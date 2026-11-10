@@ -229,7 +229,8 @@ describe("operations", () => {
   it("asks a human when an agent exceeds its own risk ceiling", async () => {
     const result = await executeOperation(
       "run.exec",
-      { argv: ["ffuf", "-u", "https://app.cliente.example/FUZZ"], targets: ["app.cliente.example"], risk: "intrusive" },
+      // curl is on every machine: the test is about the ceiling, not about which tools are installed.
+      { argv: ["curl", "-X", "PUT", "https://app.cliente.example/"], targets: ["app.cliente.example"], risk: "intrusive" },
       ctx(agent),
     );
     expect(result).toMatchObject({ status: "pending_approval" });
