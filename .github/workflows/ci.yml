@@ -19,6 +19,10 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm i18n:check
       - run: pnpm electron:check
+      # Ubuntu 24.04 restricts the user namespaces Chrome's sandbox needs unless an AppArmor profile
+      # allows them; the agent's browser tests run Chrome with its sandbox on, as users do.
+      - name: Let Chrome use its sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: pnpm test
 
   # Plugins written against every supported apiVersion, and the ones that ship with Penteos,
