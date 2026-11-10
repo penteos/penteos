@@ -15,7 +15,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Release image (old glibc, so the packages run on old distributions)
         run: docker build -t penteos-release scripts/release
       - name: Packages for x86_64 and arm64
@@ -24,7 +24,7 @@ jobs:
           docker run --rm -v "$PWD":/src -v "$PWD/out":/out penteos-release sh scripts/release/build.sh x64,arm64
       - name: The tag matches the app's version
         run: test "v$(cat out/VERSION)" = "${GITHUB_REF_NAME%%-*}" || test "v$(cat out/VERSION)" = "$GITHUB_REF_NAME"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: packages
           path: out/
@@ -50,8 +50,8 @@ jobs:
     name: install on ${{ matrix.image }} (${{ matrix.runner == 'ubuntu-24.04-arm' && 'arm64' || 'x86_64' }})
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: packages
           path: pkg
@@ -66,8 +66,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: packages
           path: out

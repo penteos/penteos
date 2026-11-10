@@ -1,14 +1,22 @@
 version: 2
 updates:
+  # Libraries: one pull request a week for minor and patch updates, one for major ones (they are
+  # reviewed by hand). Security updates still come as soon as an advisory is published.
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+      major:
+        update-types: [major]
+  # The CI's actions: all in one pull request a month.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
