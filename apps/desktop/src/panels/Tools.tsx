@@ -44,7 +44,7 @@ interface Capability {
   /** Only the system's package manager has it: installed with the password window (or by hand). */
   system?: { tool: string; command: string; password: boolean };
   /** nmap's packet capture permission (SYN scans, OS detection, UDP). */
-  capture?: { state: "root" | "capability" | "none"; password: boolean };
+  capture?: { state: "root" | "capability" | "none"; password: boolean; grantable?: boolean };
 }
 
 interface Gap {
@@ -332,11 +332,11 @@ export function ToolsPanel() {
                   <div>{c.title[lang()]}</div>
                   {q === "degraded" && c.fallback ? <div className="muted tb-lacks">{c.fallback.lacks[lang()]}</div> : null}
                   {q === "blocked" ? <div className="muted tb-lacks">{c.system ? tr("data.tools.caps.systemNote") : tr("data.tools.caps.blockedNote")}</div> : null}
-                  {c.capture ? <div className="muted tb-lacks">{c.capture.state === "none" ? tr("data.tools.capture.none") : tr("data.tools.capture.ok")}</div> : null}
+                  {c.capture ? <div className="muted tb-lacks">{c.capture.state === "none" ? tr(c.capture.grantable === false ? "data.tools.capture.noneMac" : "data.tools.capture.none") : tr("data.tools.capture.ok")}</div> : null}
                 </div>
                 <span className="tb-cap-who mono">{who}</span>
                 <span className="tb-cap-act">
-                  {c.capture?.state === "none" ? (
+                  {c.capture?.state === "none" && c.capture.grantable !== false ? (
                     <button className="btn sm" disabled={!!busy} onClick={() => void grantCapture()} title={c.capture.password ? tr("data.tools.capture.title") : tr("data.tools.capture.manualTitle")}>
                       {busy === "capture" ? <Loader2 size={12} className="spin" /> : <Zap size={12} />} {tr("data.tools.capture.grant")}
                     </button>

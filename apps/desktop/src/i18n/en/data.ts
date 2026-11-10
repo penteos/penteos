@@ -174,6 +174,7 @@ const data: Record<string, string> = {
   "tools.caps.blockedNote": "No method of its own: the tool is needed",
   "tools.caps.systemNote": "Installed with the system: asks for the password once",
   "tools.capture.none": "Scans without the capture permission (connect): SYN, OS detection and UDP need it given once",
+  "tools.capture.noneMac": "On macOS nmap scans with connect: it finds the same open TCP ports; OS detection and UDP need root, and Penteos never scans as root",
   "tools.capture.ok": "With the capture permission: SYN, OS detection and UDP available",
   "tools.capture.grant": "Give permission",
   "tools.capture.title": "Asks for the password once and gives nmap the capture permission (setcap). Penteos never runs as root.",

@@ -5,7 +5,7 @@ import { manifestInvocation, parseWithManifest, validateManifest } from "../../t
 import type { ReplaceRule } from "../../proxy/intercept.js";
 import { NMAP_PRESETS } from "../../tools/nmap.js";
 import { ToolboxError } from "../../tools/toolbox.js";
-import { canAskPassword, captureState, forgetCaptureState, setcapCommand, which, withPassword } from "../../tools/system.js";
+import { canAskPassword, captureGrantable, captureState, forgetCaptureState, MAC_CAPTURE_NOTE, setcapCommand, which, withPassword } from "../../tools/system.js";
 import { CAPABILITIES, CAPABILITY_IDS, type CapabilityId, gapLine, isCritical, listGaps, updateGap } from "../../tools/capabilities.js";
 import { engagementId, outcome, settle, untrusted, wait } from "./shared.js";
 
@@ -170,7 +170,7 @@ defineOperation({
           ...(def.builtin ? { fallback: { name: def.builtin.name, quality: def.builtin.quality, lacks: def.builtin.lacks } } : {}),
           ...(installable && !installed ? { installable: { tool: installable, version: box!.entry(installable)!.version, size: box!.asset(installable)!.size } } : {}),
           ...(systemOnly ? { system: { tool: systemOnly.name, command: systemOnly.install!.command, password: canAskPassword() } } : {}),
-          ...(nmapBin ? { capture: { state: captureState(nmapBin), password: canAskPassword() } } : {}),
+          ...(nmapBin ? { capture: { state: captureState(nmapBin), password: canAskPassword(), grantable: captureGrantable() } } : {}),
         };
       }),
     };
@@ -336,6 +336,7 @@ defineOperation({
     const box = ctx.runner(input.engagementId).registry.toolbox;
     const nmap = box?.binaryPath("nmap") ?? which("nmap");
     if (!nmap) return { nmap: null, state: "none", note: "nmap is not installed" };
+    if (!captureGrantable()) return { nmap, state: captureState(nmap), canAskPassword: false, note: MAC_CAPTURE_NOTE };
     return { nmap, state: captureState(nmap), canAskPassword: canAskPassword(), command: `sudo ${setcapCommand(nmap).join(" ")}` };
   },
 });
@@ -351,6 +352,7 @@ defineOperation({
     const box = ctx.runner(input.engagementId).registry.toolbox;
     const nmap = box?.binaryPath("nmap") ?? which("nmap");
     if (!nmap) throw new OperationError("NOT_FOUND", "nmap is not installed");
+    if (!captureGrantable()) return { status: "unsupported", note: MAC_CAPTURE_NOTE };
     const argv = setcapCommand(nmap);
     if (!canAskPassword()) return { status: "manual", command: `sudo ${argv.join(" ")}` };
     const r = await withPassword(argv, 3 * 60_000);

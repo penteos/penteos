@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Actor } from "@penteos/schema";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -170,6 +170,26 @@ describe("approving code", () => {
       expect(w.host.get("lab.coded")?.reason?.detail).toMatch(/does not register the handlers escape, crash/);
     } finally {
       w.close();
+    }
+  });
+});
+
+describe("folders behind links", () => {
+  // On macOS the temporary folder and some homes sit behind links (/var is /private/var); Node's
+  // permission model checks real paths, so the plugin must be granted the real ones.
+  it("an isolated plugin starts when its folders are reached through a link", async () => {
+    const real = dataDir;
+    const link = join(mkdtempSync(join(tmpdir(), "penteos-link-")), "data");
+    symlinkSync(real, link);
+    dataDir = link;
+    const w = await world();
+    try {
+      const r = (await w.call("lookup", { ip: "203.0.113.9" })) as { text: string };
+      expect(r.text).toBe("seen 203.0.113.9");
+    } finally {
+      w.close();
+      dataDir = real;
+      rmSync(dirname(link), { recursive: true, force: true });
     }
   });
 });

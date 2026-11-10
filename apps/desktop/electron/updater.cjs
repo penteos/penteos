@@ -56,6 +56,22 @@ async function installKind() {
   return { kind: "manual" };
 }
 
+/** The version of the penteos package the system has now ("" if it cannot tell). */
+async function installedVersion(kind) {
+  const r = kind === "deb" ? await run("dpkg-query", ["-W", "-f=${Version}", "penteos"]) : await run("rpm", ["-q", "--qf", "%{VERSION}", "penteos"]);
+  return r.ok ? r.out.trim().replace(/-.*$/, "") : "";
+}
+
+/** The lines of a package manager's error that say what went wrong, without crash-reporter noise. */
+function packageError(text) {
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !/apport|^\s*$/i.test(l));
+  const key = lines.filter((l) => /^(E:|dpkg: error|error|Error|Errors were|Se encontraron errores|dpkg: error al)/i.test(l));
+  return (key.length ? key : lines).slice(-4).join(" ").slice(0, 400) || "the package manager failed";
+}
+
 let state = { status: "idle", current: app.getVersion() };
 let listeners = [];
 function set(next) {
@@ -140,8 +156,14 @@ async function apply() {
     }
     set({ status: "installing" });
     const args = how.kind === "deb" ? ["apt-get", "install", "-y", "--allow-downgrades", got.out] : ["sh", "-c", 'if command -v dnf >/dev/null; then dnf install -y "$0"; elif command -v zypper >/dev/null; then zypper -n install --allow-unsigned-rpm "$0"; else yum install -y "$0"; fi', got.out];
-    const done = await new Promise((resolve) => execFile("pkexec", args, { timeout: 15 * 60_000 }, (error, _o, stderr) => resolve(error ? String(stderr || error.message) : "")));
-    if (done) throw new Error(/dismissed|Not authorized|126|127/.test(done) ? "the system password was not given; nothing was installed" : done.slice(0, 300));
+    const done = await new Promise((resolve) => execFile("pkexec", args, { timeout: 15 * 60_000 }, (error, _o, stderr) => resolve(error ? { code: error.code, text: String(stderr || error.message) } : undefined)));
+    if (done) {
+      if (done.code === 126 || done.code === 127 || /dismissed|Not authorized/.test(done.text)) throw new Error("the system password was not given; nothing was installed");
+      // apt also tries to finish anything else left half-installed on the system (a kernel whose
+      // DKMS module does not build, say) and fails for that even when Penteos went in fine. What
+      // counts is the version installed now.
+      if ((await installedVersion(how.kind)) !== state.latest) throw new Error(packageError(done.text));
+    }
     set({ status: "restarting" });
     app.relaunch();
     app.exit(0);

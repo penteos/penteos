@@ -1,6 +1,6 @@
 import ipaddr from "ipaddr.js";
 import { cdnOf } from "../cdn.js";
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { spawnTied } from "../tied.js";
 import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
@@ -1987,6 +1987,13 @@ export class ToolRunner {
     if (box?.asset(name)) return this.installFromCatalog(name, by);
     const manifest = this.registry.get(name);
     if (!manifest?.install) throw new Error(`${name} has no install recipe`);
+    // Homebrew (macOS) installs without root: the command runs as it is, seen as a run.
+    if (manifest.install.method === "system" && detectPackageManager() === "brew" && manifest.install.packages.brew) {
+      return this.installWithBrew(name, manifest.install.packages.brew, by);
+    }
+    if (manifest.install.method === "system" && process.platform === "darwin" && !detectPackageManager()) {
+      throw new Error(`${name} installs with Homebrew on macOS, and Homebrew is not installed: install it from https://brew.sh, then ask again (no password is needed after that)`);
+    }
     // The system's package, with the desktop's password window: one exact command, seen as a run.
     if (manifest.install.method === "system" && canAskPassword()) {
       const pm = detectPackageManager();
@@ -2268,6 +2275,28 @@ export class ToolRunner {
         end("failed", { error: e.message, ...(e instanceof ToolboxError ? { code: e.code } : {}) });
       },
     );
+    return { status: "started", run };
+  }
+
+  /** Installs a package with Homebrew (macOS: no root, no password), as a run in Executions. */
+  private installWithBrew(name: string, pkg: string, by: Actor): RunOutcome {
+    const argv = ["install", pkg];
+    const run = this.engagement.startRun({ actor: by, origin: "runner", tool: "brew", command: `brew ${argv.join(" ")}`, targets: [], risk: "passive", policy: { result: "approved", reason: "system install with Homebrew" }, runner: "local" });
+    this.live.set(run.id, "");
+    execFile("brew", argv, { timeout: 30 * 60_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, HOMEBREW_NO_ENV_HINTS: "1" } }, (error, stdout, stderr) => {
+      const output = `${stdout ?? ""}${stderr ?? ""}`;
+      this.live.delete(run.id);
+      const rawIds = output.trim() ? [this.engagement.putRaw(Buffer.from(output), { type: "stdout", mime: "text/plain", runId: run.id })] : [];
+      this.registry.invalidate();
+      if (!error) {
+        this.engagement.finishRun(run.id, { status: "finished", exitCode: 0, rawIds, summary: { installed: { tool: name, via: "brew" } } });
+        this.engagement.audit(by, "tool.installed", { tool: name }, { via: "brew", command: `brew ${argv.join(" ")}` });
+        this.engagement.events.emit("change", { type: "tool.installed", tool: name, version: "system" });
+        void this.resumeGaps(name).catch(() => undefined);
+      } else {
+        this.engagement.finishRun(run.id, { status: "failed", rawIds, summary: { error: output.trim().split("\n").slice(-3).join(" ").slice(0, 300) || error.message, code: "FAILED" } });
+      }
+    });
     return { status: "started", run };
   }
 

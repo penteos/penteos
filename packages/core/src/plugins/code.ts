@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpat
 import { setPriority } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { offlineSandbox } from "../sandbox.js";
+import { lsofConnections, psTable, treeOf } from "./procinfo.js";
 import { CODE_RUNNER_SOURCE } from "./code-runner.js";
 import { PYTHON_RUNNER_SOURCE } from "./python-runner.js";
 import type { PluginData } from "./data.js";
@@ -129,6 +130,7 @@ export function memoryCeiling(execPath: string, wantedMb: number, probe: string[
 
 /** A process and everything it started (bwrap runs the plugin as its child). */
 function processTree(pid: number): number[] {
+  if (process.platform === "darwin") return treeOf(psTable(), pid);
   const out = [pid];
   for (let i = 0; i < out.length && out.length < 64; i++) {
     try {
@@ -156,6 +158,7 @@ function hexIp6(h: string): string {
 
 /** Established connections of a process tree to other machines (Linux /proc): what went around the proxy. */
 export function connectionsOf(pids: number[]): Array<{ ip: string; port: number }> {
+  if (process.platform === "darwin") return lsofConnections(pids);
   const inodes = new Set<string>();
   for (const pid of pids) {
     try {
@@ -195,6 +198,7 @@ export function connectionsOf(pids: number[]): Array<{ ip: string; port: number 
 
 /** The command line of a process (for the activity of a free plugin). */
 function commandOf(pid: number): string | undefined {
+  if (process.platform === "darwin") return psTable().find((r) => r.pid === pid)?.command;
   try {
     return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ").slice(0, 300);
   } catch {
@@ -207,6 +211,12 @@ export type Observation = { kind: "connection"; ip: string; port: number } | { k
 
 /** CPU time a process tree has used, in ms (Linux /proc); undefined where it cannot be read. */
 function cpuMs(pid: number): number | undefined {
+  if (process.platform === "darwin") {
+    const rows = psTable();
+    const tree = treeOf(rows, pid);
+    const mine = rows.filter((r) => tree.includes(r.pid));
+    return mine.length ? mine.reduce((t, r) => t + r.cpuMs, 0) : undefined;
+  }
   let total = 0;
   let read = false;
   for (const p of processTree(pid)) {
@@ -322,7 +332,10 @@ export class CodePluginProcess {
         rejectStart(new Error("python3 is not installed on this machine"));
         return;
       }
-      const runner = python ? pythonRunnerFile(this.options.hostDir) : runnerFile(this.options.hostDir);
+      // Real paths: on macOS the temporary and some home folders sit behind links (/var is
+      // /private/var), and Node's permission model checks the real path, so a grant on the linked
+      // one would refuse the plugin its own files.
+      const runner = realpathSync(python ? pythonRunnerFile(this.options.hostDir) : runnerFile(this.options.hostDir));
       const dir = realpathSync(this.options.plugin.dir);
       const node = python
         ? ["python3", "-u", "-B", runner, main]
@@ -337,8 +350,11 @@ export class CodePluginProcess {
       const inner = sandbox ? sandbox.wrap(node[0]!, node.slice(1), dir) : { command: node[0]!, args: node.slice(1) };
       // The kernel's ceiling on its memory (any Linux: sh and ulimit): tight when isolated, wide when
       // free - it does not limit what a free plugin does, it keeps a runaway one from taking the machine.
-      const ceiling = python ? memoryCeiling("python3", L.freeMemoryMb, ["-c", "0"]) : memoryCeiling(process.execPath, free ? L.freeMemoryMb : L.memoryMb);
-      this.memoryCeilingMb = ceiling;
+      // macOS does not enforce ulimit -d: there the ceiling is kept by the watchdog from the
+      // processes' resident memory instead (startWatchdog).
+      const darwin = process.platform === "darwin";
+      const ceiling = darwin ? undefined : python ? memoryCeiling("python3", L.freeMemoryMb, ["-c", "0"]) : memoryCeiling(process.execPath, free ? L.freeMemoryMb : L.memoryMb);
+      this.memoryCeilingMb = darwin ? (python || free ? L.freeMemoryMb : L.memoryMb) : ceiling;
       // Through sh: the kernel's memory ceiling, and a low CPU priority the plugin itself inherits.
       const shell = process.platform === "linux" || process.platform === "darwin";
       const prelude = `${ceiling ? `ulimit -d ${ceiling * 1024}; ` : ""}command -v nice >/dev/null 2>&1 && exec nice -n 10 "$@"; exec "$@"`;
@@ -473,13 +489,16 @@ export class CodePluginProcess {
     let busy = 0;
     const seenConnections = new Set<string>();
     const seenPids = new Set<number>();
+    let tick = 0;
     this.watchdog = setInterval(() => {
+      tick++;
       if (this.child !== child || !child.pid) return this.stopWatchdog();
       if (this.calls.size === 0 && Date.now() - this.lastUsed > this.limits.idleStopMs) return this.end("stopped after being idle");
       // A free plugin is watched, not limited: what it connects to and what it starts.
       if (this.isolation === "free" && this.options.onObserve) {
         const tree = processTree(child.pid);
-        for (const c of connectionsOf(tree)) {
+        // lsof (macOS) is slower than reading /proc: every third sample is enough to see a connection.
+        for (const c of process.platform !== "darwin" || tick % 3 === 1 ? connectionsOf(tree) : []) {
           const key = `${c.ip}:${c.port}`;
           if (seenConnections.has(key)) continue;
           seenConnections.add(key);
@@ -491,6 +510,13 @@ export class CodePluginProcess {
           const command = commandOf(pid);
           if (command) this.options.onObserve({ kind: "process", command });
         }
+      }
+      // macOS does not enforce ulimit -d: the memory ceiling is kept here, from the resident size.
+      if (process.platform === "darwin" && this.memoryCeilingMb) {
+        const rows = psTable();
+        const tree = treeOf(rows, child.pid);
+        const mb = rows.filter((r) => tree.includes(r.pid)).reduce((t, r) => t + r.rssKb, 0) / 1024;
+        if (mb > this.memoryCeilingMb) return this.end(`it used more than ${this.memoryCeilingMb} MB of memory`);
       }
       const now = cpuMs(child.pid);
       if (now === undefined || last === undefined) return;

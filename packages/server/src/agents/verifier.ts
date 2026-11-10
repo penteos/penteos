@@ -2,6 +2,7 @@ import type { Actor } from "@penteos/schema";
 import { type Caller, currentPhase, type Language, languageRules, listOperations, type OperationContext, type VerifierControl, type Workspace } from "@penteos/core";
 import { SubAgent } from "./subagent.js";
 import { msg } from "./messages.js";
+import { hostSystemNote } from "./tools.js";
 import type { AgentEvent, ProviderSession, ProviderSettings } from "./types.js";
 
 /** A provider error in one line for humans: status and message, never the JSON body. */
@@ -155,7 +156,7 @@ export class Verifier implements VerifierControl {
       session: p.create(),
       settings: p.settings,
       localModel: p.id === "local",
-      system: `${SYSTEM}\n\n${languageRules(null, engagement.info.language ?? "en")}`,
+      system: `${SYSTEM}\n${hostSystemNote()}\n\n${languageRules(null, engagement.info.language ?? "en")}`,
       allow: (op) => WRITE_TOOLS.has(op) || readOps().has(op),
       workspace: this.workspace,
       dataDir: this.dataDir,

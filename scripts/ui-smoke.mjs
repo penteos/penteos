@@ -387,6 +387,20 @@ for (const section of sections) {
   await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
   await sleep(300);
 }
+// Help, About Penteos: the author, a way to reach them, and where the project lives.
+{
+  await evaluate(`[...document.querySelectorAll('.menu-title')].find((b) => /^(Ayuda|Help)$/.test(b.textContent.trim()))?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+  await sleep(200);
+  await evaluate(`[...document.querySelectorAll('.menu-item')].find((x) => /Acerca de|About/.test(x.textContent))?.click()`);
+  await sleep(400);
+  const about = await evaluate(`document.querySelector('.about')?.textContent ?? ""`);
+  writeFileSync(join(out, "about.png"), Buffer.from((await send("Page.captureScreenshot", { format: "png" })).result.data, "base64"));
+  const okAbout = /Santiago Habib/.test(about) && /santiago@kalir\.io/.test(about) && /AGPL-3\.0/.test(about);
+  if (!okAbout) failed++;
+  console.log(`${okAbout ? "ok " : "FAIL"} about: author, contact and license shown`);
+  await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
+  await sleep(200);
+}
 // The catalog: the ready-made plugins are offered; Jira installs from the interface with one
 // approval, and once enabled in the project its action shows on a finding.
 {

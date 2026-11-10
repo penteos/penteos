@@ -1,4 +1,5 @@
-import { OctagonX } from "../ui/icons";
+import { Mark, OctagonX } from "../ui/icons";
+import { useUpdates } from "../ui/Updates";
 import { useState } from "react";
 import type { CoreClient } from "../client";
 import { ProjectWizard } from "../ProjectWizard";
@@ -76,9 +77,52 @@ export function HelpModal(props: { kind: "modes" | "keys" | "about"; onClose: ()
           <tbody>{keys.map(([k, d]) => <tr key={k}><td className="mono" style={{ width: 150 }}>{k}</td><td>{d}</td></tr>)}</tbody>
         </table>
       ) : (
-        <span>{t("shell.help.aboutText")}</span>
+        <About />
       )}
     </Modal>
   );
 }
 
+
+/** Help, About Penteos: what it is, which version this is, who makes it and where to find it. */
+const ABOUT = {
+  author: "Santiago Habib",
+  email: "santiago@kalir.io",
+  site: "https://penteos.com",
+  repo: "https://github.com/penteos/penteos",
+  license: "https://github.com/penteos/penteos/blob/main/LICENSE",
+};
+
+function About() {
+  const version = useUpdates()?.current;
+  const link = (href: string, text: string) => (
+    <a href={href} target="_blank" rel="noreferrer">
+      {text}
+    </a>
+  );
+  return (
+    <div className="about">
+      <div className="about-head">
+        <Mark size={44} />
+        <div>
+          <div className="about-name">Penteos{version ? <span className="muted mono"> {version}</span> : null}</div>
+          <div className="muted">{t("shell.about.tagline")}</div>
+        </div>
+      </div>
+      <p>{t("shell.help.aboutText")}</p>
+      <dl className="about-facts">
+        <dt>{t("shell.about.author")}</dt>
+        <dd>{ABOUT.author}</dd>
+        <dt>{t("shell.about.contact")}</dt>
+        <dd>{link(`mailto:${ABOUT.email}`, ABOUT.email)}</dd>
+        <dt>{t("shell.about.site")}</dt>
+        <dd>{link(ABOUT.site, "penteos.com")}</dd>
+        <dt>{t("shell.about.code")}</dt>
+        <dd>{link(ABOUT.repo, "github.com/penteos/penteos")}</dd>
+        <dt>{t("shell.about.license")}</dt>
+        <dd>{link(ABOUT.license, "AGPL-3.0")}</dd>
+      </dl>
+      <p className="muted about-copy">© 2026 {ABOUT.author}</p>
+    </div>
+  );
+}

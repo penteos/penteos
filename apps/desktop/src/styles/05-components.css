@@ -433,3 +433,13 @@ textarea.input { height: auto; padding: 7px 8px; resize: vertical; line-height: 
 .update-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .update-bar { height: 4px; border-radius: 2px; background: var(--bg-4); overflow: hidden; }
 .update-bar > i { display: block; height: 100%; background: var(--accent); transition: width .3s ease; }
+.about { display: flex; flex-direction: column; gap: 12px; min-width: min(420px, 100%); }
+.about-head { display: flex; align-items: center; gap: 14px; }
+.about-name { font-size: 18px; font-weight: 600; color: var(--fg-0); }
+.about p { margin: 0; line-height: 1.5; }
+.about-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.about-facts dt { color: var(--fg-2); }
+.about-facts dd { margin: 0; }
+.about-copy { font-size: 12px; }
+.about a { color: var(--accent); text-decoration: none; }
+.about a:hover { text-decoration: underline; }

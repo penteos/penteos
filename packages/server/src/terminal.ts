@@ -126,7 +126,8 @@ export class TerminalManager {
   /** How terminals run here (shown to the operator when it is not a full one). */
   get mode(): TerminalMode {
     if (this.force) return this.force;
-    return loadPty() ? "pty" : has("script") ? "script" : "pipe";
+    // `script` with these arguments is util-linux's; macOS ships the BSD one, with another syntax.
+    return loadPty() ? "pty" : process.platform === "linux" && has("script") ? "script" : "pipe";
   }
 
   open(cols: number, rows: number, onData: (data: string) => void, onExit: (code: number) => void): string {

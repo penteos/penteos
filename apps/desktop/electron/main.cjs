@@ -34,8 +34,10 @@ const { homedir } = require("node:os");
 const path = require("node:path");
 const { setNoteActionHandler, setBlockActionHandler } = require("./browser/window.cjs");
 const updater = require("./updater.cjs");
+const { adoptShellPath } = require("./shell-path.cjs");
+/** The operator's full PATH (Homebrew, ~/go/bin…), looked up while the splash shows; the core waits for it. */
+let pathReady = Promise.resolve();
 
-/** $XDG_DATA_HOME/penteos (~/.local/share/penteos), as the core's defaultDataDir. */
 /** A link the desktop may open: the web or e-mail, nothing that reaches local files or programs. */
 function isWebLink(url) {
   try {
@@ -45,8 +47,11 @@ function isWebLink(url) {
   }
 }
 
+/** Same rule as the core's defaultDataDir (packages/core/src/paths.ts). */
 function defaultDataDir() {
-  return path.join(process.env.XDG_DATA_HOME || path.join(homedir(), ".local", "share"), "penteos");
+  if (process.env.XDG_DATA_HOME) return path.join(process.env.XDG_DATA_HOME, "penteos");
+  if (process.platform === "darwin") return path.join(homedir(), "Library", "Application Support", "Penteos");
+  return path.join(homedir(), ".local", "share", "penteos");
 }
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
@@ -413,6 +418,7 @@ async function createWindow() {
     });
   }
   const connection = readConnection();
+  await pathReady;
   const info = connection.mode === "remote" ? undefined : await startCore((p) => splash?.plugins(p));
   // Always opens maximized. The size here is only what "restore" goes back to: it leaves a margin
   // because on GNOME/X11 Electron reports the whole screen as work area, top bar and dock included.
@@ -565,7 +571,7 @@ function integrateAppImage() {
 }
 
 
-app.whenReady().then(() => { pinCertificate(); integrateAppImage(); warnLowDisk(); return createWindow(); }).catch((error) => {
+app.whenReady().then(() => { pathReady = adoptShellPath().catch(() => undefined); pinCertificate(); integrateAppImage(); warnLowDisk(); return createWindow(); }).catch((error) => {
   console.error(error);
   return startFailed(error);
 });

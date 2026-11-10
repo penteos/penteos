@@ -99,6 +99,14 @@ export function adaptNmap(argv: string[], state: CaptureState): { argv: string[]
 
 export const SETCAP_CAPS = "cap_net_raw,cap_net_admin,cap_net_bind_service+eip";
 
+/** Whether nmap can be given the capture permission once: a file capability exists only on Linux. */
+export function captureGrantable(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === "linux";
+}
+
+/** macOS has no file capabilities: raw packets need root there, and Penteos never scans as root. */
+export const MAC_CAPTURE_NOTE = "On macOS raw packets need root, and Penteos never runs a scan as root: nmap scans with connect (-sT), which finds the same open TCP ports; OS detection and UDP are left out.";
+
 /** The command that gives nmap the capture permission (shown, or run through pkexec). */
 export function setcapCommand(nmap: string): string[] {
   let real = nmap;

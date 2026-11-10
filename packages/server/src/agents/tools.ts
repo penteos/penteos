@@ -178,6 +178,18 @@ function autonomyPrompt(autonomy: EngagementInfo["autonomy"]): string {
   return "";
 }
 
+/**
+ * The system the commands run on. On macOS the userland is BSD's, and the usual Linux habits fail
+ * there (sed -i without a suffix, grep -P, base64 -w, timeout): the agents are told up front.
+ */
+export function hostSystemNote(platform: NodeJS.Platform = process.platform): string {
+  if (platform === "darwin") {
+    return "- This machine runs macOS: commands in run_exec use BSD tools, not GNU. sed -i needs an empty suffix (sed -i '' …); there is no grep -P (use grep -E, or python); base64 decodes with -D and has no -w; there is no timeout command (use run_exec's wait); date -d and GNU stat flags do not exist; prefer python3 for anything non-trivial. Wordlists are not under /usr/share unless the operator installed them. SYN scans need root on macOS: nmap does connect scans (-sT), which is expected, not a fault.";
+  }
+  if (platform === "win32") return "- This machine runs Windows: run_exec commands do not have a Unix shell; prefer Penteos's own tools and python3.";
+  return "- This machine runs Linux (GNU tools).";
+}
+
 export function systemPrompt(info: EngagementInfo & { scope: ScopeRule[] }, via: "tools" | "mcp", operatorLanguage: Language = "en"): string {
   const scope = info.scope.map(describeRule).join("\n");
   const round = info.roundMode === "retest" ? " Round: RETEST (verify the inherited findings one by one, do not hunt for new scope)." : info.roundMode === "continuous" ? " Round: CONTINUOUS (what changed since the last photo matters more than a full re-scan)." : "";
@@ -211,6 +223,7 @@ How you work:
   If a plugin you built fails when the operator uses it, you will hear it: find the cause against the real service and propose the fix.
 - When an integrated tool's output did not land in the graph, record what matters with ingest_submit_batch, citing the run's raw output.
 - Local analysis (grep, jq, python, sort over files you already have: a downloaded bundle, a tool's output, raw data) goes through run_exec with no targets: it runs at once with no approval inside an offline sandbox (no network at all, writes only to the project's work folder and /tmp). Keep downloaded files in the work folder. Anything that needs the network must declare its targets; if a command fails offline because it needed the network, that is why.
+${hostSystemNote()}
 - Pass "wait" (seconds) to capability_run / tool_run / run_exec to get the output in the same call: short for quick commands (dig, curl: 30), longer for scans. If a run is still going, use run_wait instead of polling run_get.
 - Work by phases (engagement_brief → phases): the current phase says what to do now. When a phase starts, write its plan with plan_set_phase_plan (a short list of steps and why) and tell the operator in two lines. Stay inside the phase: do not jump ahead (no exploitation during recon or mapping; exploitation-level actions are blocked until the operator moves the engagement to a phase that allows them). When the phase's goal is covered, close it with phase_request (summary: what was done, found and left) and wait for the operator's decision - except the reporting and closing phases: those are only the operator's to open; never request them, never remind the operator about them, never say the report is waiting. Before asking to move on, check which phase you are in (engagement_brief): if the operator already moved you to the phase you would request, you are there - do its work, do not ask again; and if a pass is already waiting for the operator, do not request it a second time. Each message should make clear which phase you are in.
 - One request per action: if a tool call returns pending_approval (or a note that you already asked), do not ask again. If your plan changes while a request is waiting, withdraw it with approval_withdraw. When an approval is accepted, Penteos runs it itself: never run it again, wait with run_wait.
