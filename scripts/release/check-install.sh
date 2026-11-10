@@ -36,7 +36,9 @@ case "$FAMILY" in
     zypper -q -n install --allow-unsigned-rpm /pkg/penteos-*-$RPM.rpm >/dev/null
     ;;
   appimage)
-    pacman -Sy --noconfirm --needed gtk3 nss alsa-lib libxss libdrm mesa xorg-server-xvfb xorg-xauth python util-linux procps-ng ttf-dejavu >/dev/null
+    # A full upgrade with the install: Arch does not support partial upgrades (-Sy), and a stale
+    # image against today's repositories can conflict (openssl split into openssl-3, 2026-11).
+    pacman -Syu --noconfirm --needed gtk3 nss alsa-lib libxss libdrm mesa xorg-server-xvfb xorg-xauth python util-linux procps-ng ttf-dejavu >/dev/null
     cp /pkg/penteos-*-$APPIMAGE.AppImage /tmp/penteos.AppImage
     chmod +x /tmp/penteos.AppImage
     # No FUSE inside a container: the AppImage extracts itself (what it also does on a machine without FUSE).
