@@ -22,6 +22,7 @@ import { GROUPS, type GroupId, groupOf, setVisiblePanels } from "./shell/groups"
 import { Palette } from "./shell/Palette";
 import { revealProjectFolder } from "./ui/files";
 import { HelpModal, StopWorkModal } from "./shell/Modals";
+import { checkForUpdates, setAutomaticUpdates, UpdateNotice, useUpdates } from "./ui/Updates";
 import { BOTTOM, components, EDITOR, LAYOUT_KEY, loadSizes, SIZES_KEY, type Sizes, Tab, theme } from "./shell/registry";
 // ---------------------------------------------------------------------------------------------
 // Resizable regions
@@ -127,6 +128,7 @@ function Shell(props: {
     return () => window.removeEventListener("penteos:ai-level", open);
   }, []);
   const [help, setHelp] = useState<"modes" | "keys" | "about">();
+  const updates = useUpdates();
   const [showAll, setShowAllState] = useState(loadShowAll);
   const [workStyle, setWorkStyle] = useState<string>();
   const [recent, setRecent] = useState<EngagementSummary[]>([]);
@@ -405,6 +407,9 @@ function Shell(props: {
         // The way out when a plugin breaks things: restart with every plugin off.
         { label: t("shell.help.safeMode"), disabled: !window.penteosDesktop?.restart, onClick: () => void window.penteosDesktop?.restart?.({ safeMode: true }) },
         "sep",
+        { label: t("shell.update.check"), disabled: !window.penteosDesktop?.updates, onClick: () => void checkForUpdates() },
+        { label: t("shell.update.automatic"), disabled: !window.penteosDesktop?.updates, checked: updates?.automatic !== false, onClick: () => void setAutomaticUpdates(updates?.automatic === false) },
+        "sep",
         { label: t("shell.help.about"), onClick: () => setHelp("about") },
       ],
     },
@@ -473,6 +478,7 @@ function Shell(props: {
       <PluginNotices />
       <PluginRunHost />
       <PluginAlerts />
+      <UpdateNotice />
       <Toasts />
     </div>
   );

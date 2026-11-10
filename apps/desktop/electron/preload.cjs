@@ -31,6 +31,18 @@ contextBridge.exposeInMainWorld("penteosDesktop", {
   isSafeMode: () => ipcRenderer.invoke("app:safe-mode"),
   /** The operator's interface language, so start-up dialogs speak it before the workbench loads. */
   setLanguage: (language) => ipcRenderer.invoke("language:set", language),
+  /** Updates: the state, a manual check, install, automatic checks on or off, and changes as they happen. */
+  updates: {
+    state: () => ipcRenderer.invoke("update:state"),
+    check: () => ipcRenderer.invoke("update:check"),
+    apply: () => ipcRenderer.invoke("update:apply"),
+    setAutomatic: (on) => ipcRenderer.invoke("update:automatic", on),
+    onState: (listener) => {
+      const handler = (_e, s) => listener(s);
+      ipcRenderer.on("update:state", handler);
+      return () => ipcRenderer.removeListener("update:state", handler);
+    },
+  },
   /** The workbench is connected to the core: the splash can give way to it. */
   appReady: () => ipcRenderer.send("app:ready"),
   /** Progress of the Maestro's note in the project browser ({ engagementId, taskId, exchanges, hosts, sent }). */

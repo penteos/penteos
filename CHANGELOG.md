@@ -4,6 +4,17 @@ All notable changes to Penteos are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-11-10
+
+- **Updates.** Penteos checks for a newer release when it starts and every few hours (one
+  download of the release's VERSION file from GitHub; nothing about you is sent), says so on the
+  splash and in a card in the workbench, and installs it when you ask: an AppImage is replaced and
+  restarts by itself, a `.deb` or `.rpm` is installed through your system's password prompt, every
+  download checked against the release's `SHA256SUMS`. Help, Check for updates; automatic checks
+  can be turned off there.
+- **Installer.** `install.sh` greets with PENTEOS in ASCII art, and the release workflow runs it end
+  to end before publishing.
+
 ## [0.1.0] - 2026-11-10
 
 The first public release: the AI pentest workbench. Recon to report in one place, with an agent

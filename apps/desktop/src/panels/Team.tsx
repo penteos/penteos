@@ -28,6 +28,14 @@ declare global {
     penteosDesktop?: {
       getConnection(): Promise<{ mode: "local" } | { mode: "remote"; url: string }>;
       setConnection(c: { mode: "local" } | { mode: "remote"; url: string; token: string; fingerprint?: string }): Promise<void>;
+      /** Updates of the app itself (see ui/Updates). */
+      updates?: {
+        state(): Promise<import("../ui/Updates").UpdateState>;
+        check(): Promise<import("../ui/Updates").UpdateState>;
+        apply(): Promise<import("../ui/Updates").UpdateState>;
+        setAutomatic(on: boolean): Promise<boolean>;
+        onState(listener: (s: import("../ui/Updates").UpdateState) => void): () => void;
+      };
       /** The operator's interface language, for the start-up dialogs. */
       setLanguage?(language: "es" | "en"): Promise<void>;
       /** Opens the project browser (through Penteos's proxy). */

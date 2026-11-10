@@ -423,3 +423,11 @@ textarea.input { height: auto; padding: 7px 8px; resize: vertical; line-height: 
 .plugin-notice .pn-detail { font-size: 11px; color: var(--fg-3); word-break: break-word; }
 .plugin-notice .pn-actions { display: flex; gap: 8px; }
 .plugin-notice .pn-log { margin: 0; max-height: 180px; overflow: auto; font-size: 10.5px; color: var(--fg-2); background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px; padding: 8px; white-space: pre-wrap; word-break: break-all; }
+
+/* Updates: a quiet card above the toasts */
+.update-card { position: fixed; right: 16px; bottom: 44px; z-index: 900; width: 340px; max-width: calc(100vw - 32px); display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-2); box-shadow: 0 12px 32px rgba(0, 0, 0, .35); }
+.update-head { display: flex; flex-direction: column; gap: 2px; }
+.update-line { font-size: 12px; line-height: 1.45; }
+.update-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.update-bar { height: 4px; border-radius: 2px; background: var(--bg-4); overflow: hidden; }
+.update-bar > i { display: block; height: 100%; background: var(--accent); transition: width .3s ease; }

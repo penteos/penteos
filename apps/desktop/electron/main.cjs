@@ -33,6 +33,7 @@ const { writeFileSync, mkdirSync, readFileSync, existsSync, renameSync, rmSync, 
 const { homedir } = require("node:os");
 const path = require("node:path");
 const { setNoteActionHandler, setBlockActionHandler } = require("./browser/window.cjs");
+const updater = require("./updater.cjs");
 
 /** $XDG_DATA_HOME/penteos (~/.local/share/penteos), as the core's defaultDataDir. */
 /** A link the desktop may open: the web or e-mail, nothing that reaches local files or programs. */
@@ -297,6 +298,17 @@ ipcMain.handle("language:set", (_e, language) => {
   writeFileSync(languageFile(), JSON.stringify({ language }));
 });
 
+// Updates: the workbench asks for the state, the operator decides when to install.
+let mainWindow;
+ipcMain.handle("update:state", () => ({ ...updater.state(), automatic: updater.automatic() }));
+ipcMain.handle("update:check", () => updater.check({ manual: true }));
+ipcMain.handle("update:apply", () => updater.apply());
+ipcMain.handle("update:automatic", (_e, on) => {
+  updater.setAutomatic(on);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("update:state", { ...updater.state(), automatic: updater.automatic() });
+  return updater.automatic();
+});
+
 /** Penteos could not start: say why, where the log is, and offer the way out. */
 async function startFailed(error) {
   const es = spanish();
@@ -377,6 +389,11 @@ function openSplash() {
       if (splash.isDestroyed()) return;
       splash.webContents.executeJavaScript(`window.penteosPlugins && window.penteosPlugins(${JSON.stringify(p)})`).catch(() => {});
     },
+    /** A newer release, said on the splash; installing happens from the workbench. */
+    update(s) {
+      if (splash.isDestroyed() || s.status !== "available") return;
+      splash.webContents.executeJavaScript(`window.penteosUpdate && window.penteosUpdate(${JSON.stringify({ latest: s.latest })})`).catch(() => {});
+    },
     /** Closes the splash once it has been visible long enough, then runs `next`. */
     close(next) {
       setTimeout(() => {
@@ -389,6 +406,12 @@ function openSplash() {
 
 async function createWindow() {
   const splash = SHOT ? undefined : openSplash();
+  if (!SHOT) {
+    updater.start((s) => {
+      splash?.update(s);
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("update:state", { ...s, automatic: updater.automatic() });
+    });
+  }
   const connection = readConnection();
   const info = connection.mode === "remote" ? undefined : await startCore((p) => splash?.plugins(p));
   // Always opens maximized. The size here is only what "restore" goes back to: it leaves a margin
@@ -396,7 +419,7 @@ async function createWindow() {
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   const width = Math.min(1560, area.width - 80);
   const height = Math.min(940, area.height - 140);
-  const win = new BrowserWindow({
+  const win = (mainWindow = new BrowserWindow({
     width,
     height,
     x: area.x + Math.round((area.width - width) / 2),
@@ -417,7 +440,7 @@ async function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       backgroundThrottling: !SHOT,
     },
-  });
+  }));
   // Shown first, then maximized: X11 window managers ignore maximizing a hidden window, and may
   // drop a request made at the same moment the window appears, so it is repeated until it holds.
   // The workbench appears when it is connected to the core (it says so with "app:ready"), or after

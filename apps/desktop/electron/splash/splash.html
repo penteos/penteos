@@ -36,6 +36,7 @@
   .plugins { font-size: 10px; color: var(--muted); height: 1.3em; margin-top: -6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .plugins b { color: var(--fg); font-weight: 500; }
   .plugins .warn { color: var(--amber); }
+  .update { font-size: 10px; color: var(--amber); height: 1.3em; margin-top: -6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .foot { display: flex; align-items: center; gap: 10px; }
   .bar { height: 3px; flex: 1; background: #171226; border-radius: 2px; overflow: hidden; }
   .bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--vio2), var(--amber)); transition: width .3s ease; }
@@ -60,6 +61,7 @@
       <div class="tagline">The AI pentest workbench&nbsp;&nbsp;<span class="c">&gt;_</span></div>
       <div class="status" id="status">&nbsp;</div>
       <div class="plugins" id="plugins"></div>
+      <div class="update" id="update"></div>
       <div class="foot">
         <div class="bar"><i id="fill"></i></div>
         <div class="pct" id="pct">0%</div>
@@ -110,6 +112,12 @@
       if (!p.total) { pl.innerHTML = ""; return; }
       if (p.done < p.total) { pl.innerHTML = 'plugins <b>' + p.done + '/' + p.total + '</b>' + (p.current ? ' · ' + esc(p.current) : ''); return; }
       pl.innerHTML = 'plugins <b>' + p.active + ' ok</b>' + (p.disabled ? ' · <span class="warn">' + p.disabled + ' off</span>' : '');
+    };
+
+    // A newer release: said here, installed from the workbench.
+    var up = document.getElementById("update");
+    window.penteosUpdate = function (u) {
+      if (u && u.latest) up.innerHTML = '&gt; update available: <b>v' + esc(u.latest) + '</b> · install it from Help';
     };
 
     var STEPS = ["scope engine", "interception proxy", "maestro agent", "plugin host", "independent verifier", "vulnerability intel", "privacy vault"];
