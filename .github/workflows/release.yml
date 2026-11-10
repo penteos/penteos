@@ -1,18 +1,23 @@
 name: release
 
-# A tag (v0.1.0, or v0.1.0-rc.1 for a pre-release) builds every Linux package in the release image,
-# installs them on clean distributions (x86_64 and arm64), and publishes the release only if all
-# of that passed. Anyone can read here how each downloaded file was made.
+# A tag (v0.1.0, or v0.1.0-rc.1 for a pre-release) builds every Linux package in the release image
+# and the macOS apps on a Mac, installs them on clean distributions (x86_64 and arm64) and on Apple
+# Silicon and Intel Macs, and publishes the release only if ALL of that passed: one version, every
+# system, or nothing. Anyone can read here how each downloaded file was made.
 
 on:
   push:
     tags: ["v*"]
+    # While macOS support is built: the Mac packages are made and tested on every push to this
+    # branch. Only a tag builds Linux and publishes (see the "if" of build and publish).
+    branches: [mac]
 
 permissions:
   contents: read
 
 jobs:
   build:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -29,6 +34,56 @@ jobs:
           name: packages
           path: out/
           if-no-files-found: error
+
+  # macOS: both chips built on a Mac (Apple's compiler builds the terminal module for either),
+  # signed ad hoc, with their own checksums and the installer, ready to be installed below.
+  build-mac:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Penteos.app for Apple Silicon and Intel
+        run: pnpm --filter @penteos/desktop package -- --arch arm64,x64
+      - name: The tag matches the app's version, and the files the installer reads
+        run: |
+          version="$(node -p "require('./apps/desktop/package.json').version")"
+          case "$GITHUB_REF" in refs/tags/*) test "v$version" = "${GITHUB_REF_NAME%%-*}" || test "v$version" = "$GITHUB_REF_NAME" ;; esac
+          mkdir -p out-mac
+          cp apps/desktop/release/penteos-"$version"-mac-*.zip out-mac/
+          cp scripts/install.sh out-mac/install.sh
+          printf '%s\n' "$version" > out-mac/VERSION
+          (cd out-mac && shasum -a 256 penteos-* > SHA256SUMS)
+          cat apps/desktop/build/native.json
+          ls -la out-mac
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-mac
+          path: out-mac/
+          if-no-files-found: error
+
+  install-mac:
+    needs: build-mac
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, macos-15-intel]
+    name: install on ${{ matrix.runner == 'macos-latest' && 'macOS (Apple Silicon)' || 'macOS (Intel)' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages-mac
+          path: pkg
+      - name: Install as a user would, verify the signature, run the core end to end, open the app
+        run: sh scripts/release/check-install-mac.sh pkg
 
   install:
     needs: build
@@ -81,7 +136,8 @@ jobs:
           '
 
   publish:
-    needs: [install, installer]
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [install, installer, install-mac]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -91,8 +147,16 @@ jobs:
         with:
           name: packages
           path: out
-      - name: Checksums still match what was tested
-        run: cd out && sha256sum -c SHA256SUMS
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages-mac
+          path: out-mac
+      - name: Checksums still match what was tested, then the macOS apps join the Linux packages
+        run: |
+          (cd out && sha256sum -c SHA256SUMS)
+          (cd out-mac && sha256sum -c SHA256SUMS)
+          test "$(cat out/VERSION)" = "$(cat out-mac/VERSION)"
+          cp out-mac/penteos-*.zip out/
       - name: Release notes from the changelog
         run: |
           version="$(cat out/VERSION)"

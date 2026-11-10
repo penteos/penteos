@@ -40,7 +40,8 @@ function run(mode: TerminalMode): Promise<string> {
 }
 
 describe("the integrated terminal", () => {
-  for (const mode of ["pty", "script", "pipe"] as const) {
+  // "script" is util-linux's, which only Linux has (macOS ships the BSD one, never used there).
+  for (const mode of (process.platform === "linux" ? ["pty", "script", "pipe"] : ["pty", "pipe"]) as Array<"pty" | "script" | "pipe">) {
     it(`works in ${mode} mode, with Penteos's integration and without ELECTRON_RUN_AS_NODE`, async () => {
       const out = await run(mode);
       expect(out).toContain("as-node=[none]");

@@ -587,7 +587,16 @@ export class AgentManager {
       renameSync(`${file}.tmp`, file);
     };
     if (now) write();
-    else c.saveTimer = setTimeout(write, 1000);
+    else
+      c.saveTimer = setTimeout(() => {
+        // The project may have been closed in the meantime (the app quitting, a test ending): the
+        // last immediate save already has the conversation, and a late one must never crash the core.
+        try {
+          write();
+        } catch (e) {
+          process.stderr.write(`conversation not saved for ${engagementId}: ${(e as Error).message}\n`);
+        }
+      }, 1000);
   }
 
   stop(engagementId: string): void {

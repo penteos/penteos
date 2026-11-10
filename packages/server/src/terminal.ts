@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type * as Pty from "node-pty";
 
 /**
@@ -86,12 +86,36 @@ let ptyModule: typeof Pty | null | undefined;
 function loadPty(): typeof Pty | null {
   if (ptyModule !== undefined) return ptyModule;
   try {
-    ptyModule = createRequire(import.meta.url)("node-pty") as typeof Pty;
+    const req = createRequire(import.meta.url);
+    executableHelpers(dirname(req.resolve("node-pty/package.json")));
+    ptyModule = req("node-pty") as typeof Pty;
   } catch (e) {
     process.stderr.write(`terminal: node-pty did not load (${(e as Error).message.split("\n")[0]}); using the fallback terminal\n`);
     ptyModule = null;
   }
   return ptyModule;
+}
+
+/**
+ * node-pty starts shells through a small `spawn-helper` program (macOS). Package managers often
+ * unpack it without the execute bit, and then every terminal fails with "posix_spawnp failed":
+ * give it the bit back where it is missing (and the folder is ours to write).
+ */
+function executableHelpers(ptyDir: string): void {
+  if (process.platform !== "darwin") return;
+  const candidates = [join(ptyDir, "build", "Release", "spawn-helper"), join(ptyDir, "build", "Debug", "spawn-helper")];
+  try {
+    for (const d of readdirSync(join(ptyDir, "prebuilds"))) candidates.push(join(ptyDir, "prebuilds", d, "spawn-helper"));
+  } catch {
+    /* no prebuilds folder */
+  }
+  for (const file of candidates) {
+    try {
+      if (existsSync(file) && (statSync(file).mode & 0o111) === 0) chmodSync(file, 0o755);
+    } catch {
+      /* read-only install: nothing to do here */
+    }
+  }
 }
 
 const has = (cmd: string) => spawnSync("sh", ["-c", `command -v ${cmd}`], { stdio: "ignore" }).status === 0;

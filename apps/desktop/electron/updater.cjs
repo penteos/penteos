@@ -6,13 +6,16 @@
  *     SHA256SUMS, swapped in, and the app restarts. No root.
  *   - .deb / .rpm: the package is downloaded and checked the same way, then installed through the
  *     system's own password prompt (pkexec). Never without the operator's click.
+ *   - macOS: the .zip for this Mac's chip is checked the same way, unpacked with ditto next to the
+ *     app (links and signature kept), its signature verified, then swapped in whole and restarted.
+ *     No password. Downloaded by Penteos itself, it carries no quarantine: it opens without a warning.
  *   - anything else (.tar.gz, a build from source): the release page opens.
  * Off in development, with PENTEOS_NO_UPDATE_CHECK=1, or when the operator turns checks off.
  */
 const { app, shell } = require("electron");
 const { execFile } = require("node:child_process");
 const { createHash } = require("node:crypto");
-const { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } = require("node:fs");
+const { accessSync, chmodSync, constants, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const path = require("node:path");
 
@@ -45,8 +48,27 @@ function newer(latest, current) {
 
 const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { timeout: 10_000 }, (error, stdout) => resolve({ ok: !error, out: String(stdout) })));
 
+/** The Penteos.app this process runs from (macOS), or undefined. */
+function macBundle() {
+  const m = /^(.*?\.app)\/Contents\/MacOS\//.exec(process.execPath);
+  return m ? m[1] : undefined;
+}
+
 /** How this copy was installed, and the release file that replaces it. */
 async function installKind() {
+  if (process.platform === "darwin") {
+    const bundle = macBundle();
+    if (!bundle) return { kind: "manual" };
+    try {
+      // Replacing it means writing in its folder (/Applications for an admin, ~/Applications…).
+      accessSync(path.dirname(bundle), constants.W_OK);
+    } catch {
+      return { kind: "manual" };
+    }
+    // An Intel build running under Rosetta on Apple Silicon moves to the native one.
+    const arm = process.arch === "arm64" || app.runningUnderARM64Translation;
+    return { kind: "mac", file: `penteos-mac-${arm ? "arm64" : "x64"}.zip`, target: bundle };
+  }
   const arm = process.arch === "arm64";
   if (process.env.APPIMAGE && existsSync(process.env.APPIMAGE)) return { kind: "appimage", file: `penteos-${arm ? "arm64" : "x86_64"}.AppImage`, target: process.env.APPIMAGE };
   if (process.execPath.startsWith("/opt/Penteos/")) {
@@ -143,6 +165,30 @@ async function apply() {
   try {
     const got = await fetchVerified(how.file);
     dir = got.dir;
+    if (how.kind === "mac") {
+      // Unpacked next to the app, so the swap is a rename on the same disk; checked before it.
+      const next = `${how.target}.update`;
+      const old = `${how.target}.old`;
+      rmSync(next, { recursive: true, force: true });
+      await new Promise((resolve, reject) => execFile("ditto", ["-x", "-k", got.out, next], { timeout: 5 * 60_000 }, (e) => (e ? reject(new Error(`could not unpack the update: ${e.message}`)) : resolve())));
+      const unpacked = path.join(next, "Penteos.app");
+      if (!existsSync(path.join(unpacked, "Contents", "MacOS", "Penteos"))) throw new Error("the update has no Penteos.app inside; nothing was installed");
+      await new Promise((resolve, reject) => execFile("codesign", ["--verify", "--deep", "--strict", unpacked], { timeout: 2 * 60_000 }, (e) => (e ? reject(new Error("the update's signature does not verify; nothing was installed")) : resolve())));
+      rmSync(old, { recursive: true, force: true });
+      renameSync(how.target, old);
+      try {
+        renameSync(unpacked, how.target);
+      } catch (e) {
+        renameSync(old, how.target);
+        throw e;
+      }
+      rmSync(next, { recursive: true, force: true });
+      // The old copy goes when the new one starts (cleanOldBundle): it is still running now.
+      set({ status: "restarting" });
+      app.relaunch({ execPath: path.join(how.target, "Contents", "MacOS", "Penteos"), args: process.argv.slice(1) });
+      app.exit(0);
+      return state;
+    }
     if (how.kind === "appimage") {
       // Next to the running file, then one rename: the old one is replaced whole or not at all.
       const next = `${how.target}.update`;
@@ -175,7 +221,18 @@ async function apply() {
   return state;
 }
 
+/** macOS: the copy an update replaced, removed once the new one runs. */
+function cleanOldBundle() {
+  const bundle = process.platform === "darwin" ? macBundle() : undefined;
+  if (bundle) rmSync(`${bundle}.old`, { recursive: true, force: true });
+}
+
 function start(onChange) {
+  try {
+    cleanOldBundle();
+  } catch {
+    /* tried again next start */
+  }
   listeners.push(onChange);
   void check();
   setInterval(() => void check(), EVERY).unref();

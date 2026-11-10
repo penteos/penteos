@@ -1,11 +1,13 @@
 #!/bin/sh
-# Penteos installer for Linux.
+# Penteos installer for Linux and macOS.
 #
-#   curl -fsSL <url>/install.sh | sh                 # the right package for this distribution
-#   curl -fsSL <url>/install.sh | sh -s -- --appimage  # no root: the AppImage in ~/.local/bin
+#   curl -fsSL <url>/install.sh | sh                 # the right package for this system
+#   curl -fsSL <url>/install.sh | sh -s -- --appimage  # Linux, no root: the AppImage in ~/.local/bin
 #
 # Debian/Ubuntu/Kali/Mint → .deb (apt), Fedora/RHEL/Rocky/openSUSE → .rpm (dnf/yum/zypper),
 # anything else (Arch, Gentoo, Void…) or no root → the AppImage, which needs nothing installed.
+# macOS → Penteos.app in /Applications (or ~/Applications), no password; downloaded this way it
+# opens without Gatekeeper's warning, and updates itself from then on.
 # Every download is checked against the release's SHA256SUMS before anything is installed.
 set -eu
 
@@ -40,11 +42,22 @@ if need curl; then fetch() { curl -fsSL --retry 3 -o "$2" "$1"; }
 elif need wget; then fetch() { wget -q -O "$2" "$1"; }
 else fail "curl or wget is needed to download"; fi
 
-case "$(uname -m)" in
-  x86_64|amd64) DEB_ARCH=amd64; RPM_ARCH=x86_64; IMG_ARCH=x86_64 ;;
-  aarch64|arm64) DEB_ARCH=arm64; RPM_ARCH=aarch64; IMG_ARCH=arm64 ;;
-  *) fail "unsupported architecture $(uname -m) (x86_64 or arm64 only)" ;;
-esac
+OS="$(uname -s)"
+if [ "$OS" = "Darwin" ]; then
+  # The chip itself: under Rosetta, uname -m says x86_64 on an Apple Silicon Mac.
+  if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then MAC_ARCH=arm64; else MAC_ARCH=x64; fi
+else
+  case "$(uname -m)" in
+    x86_64|amd64) DEB_ARCH=amd64; RPM_ARCH=x86_64; IMG_ARCH=x86_64 ;;
+    aarch64|arm64) DEB_ARCH=arm64; RPM_ARCH=aarch64; IMG_ARCH=arm64 ;;
+    *) fail "unsupported architecture $(uname -m) (x86_64 or arm64 only)" ;;
+  esac
+fi
+# version_ge A B: A >= B, part by part as numbers (12 = 12.0, 14.10 > 14.9).
+version_ge() { awk -v a="$1" -v b="$2" 'BEGIN { n = split(a, x, "."); m = split(b, y, "."); for (i = 1; i <= (n > m ? n : m); i++) { if ((x[i] + 0) > (y[i] + 0)) exit 0; if ((x[i] + 0) < (y[i] + 0)) exit 1 } exit 0 }'; }
+# SHA-256 of a file: sha256sum on Linux, shasum on macOS.
+if need sha256sum; then sha256() { sha256sum "$1" | cut -d' ' -f1; }
+else sha256() { shasum -a 256 "$1" | cut -d' ' -f1; }; fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -71,9 +84,35 @@ download() {
   fetch "$BASE/$file" "$TMP/$file" || fail "could not download $file"
   expected="$(grep " $file\$" "$TMP/SHA256SUMS" | cut -d' ' -f1)"
   [ -n "$expected" ] || fail "$file is not listed in SHA256SUMS"
-  actual="$(sha256sum "$TMP/$file" | cut -d' ' -f1)"
+  actual="$(sha256 "$TMP/$file")"
   [ "$expected" = "$actual" ] || fail "the checksum of $file does not match: the download is damaged or was tampered with"
 }
+
+# macOS: the app goes to /Applications when this user may write there (admins can), else to
+# ~/Applications; replaced whole, with nothing to ask.
+if [ "$OS" = "Darwin" ]; then
+  file="penteos-$VERSION-mac-$MAC_ARCH.zip"
+  download "$file"
+  # ditto keeps the app's links and signature; unzip can break both.
+  ditto -x -k "$TMP/$file" "$TMP/app"
+  [ -d "$TMP/app/Penteos.app" ] || fail "the download has no Penteos.app inside"
+  min=$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$TMP/app/Penteos.app/Contents/Info.plist" 2>/dev/null || echo "")
+  have=$(sw_vers -productVersion)
+  if [ -n "$min" ] && ! version_ge "$have" "$min"; then
+    fail "this Penteos needs macOS $min or newer; this Mac has $have"
+  fi
+  if [ -w /Applications ]; then dest=/Applications; else dest="$HOME/Applications"; mkdir -p "$dest"; fi
+  if pgrep -x Penteos >/dev/null 2>&1; then say "Penteos is open: the new version is used the next time it starts"; fi
+  rm -rf "$dest/Penteos.app.old"
+  [ -d "$dest/Penteos.app" ] && mv "$dest/Penteos.app" "$dest/Penteos.app.old"
+  mv "$TMP/app/Penteos.app" "$dest/Penteos.app"
+  rm -rf "$dest/Penteos.app.old"
+  # Downloaded with curl it carries no quarantine; cleared anyway, in case the zip came another way.
+  xattr -dr com.apple.quarantine "$dest/Penteos.app" 2>/dev/null || true
+  say "installed in $dest/Penteos.app"
+  say "done: Penteos $VERSION. Open it from Launchpad or with: open -a Penteos"
+  exit 0
+fi
 
 case "$MODE" in
   deb)

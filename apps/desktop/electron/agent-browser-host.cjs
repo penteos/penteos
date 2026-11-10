@@ -20,6 +20,8 @@ exports.run = function run() {
   // Its own profile: nothing of the operator's app (cookies, storage, the project browser) is shared.
   app.setPath("userData", profile);
   app.setName("penteos-agent-browser");
+  // macOS: the agents' browser has no window of its own to show, so no second Penteos in the Dock.
+  if (process.platform === "darwin") app.whenReady().then(() => app.dock?.hide());
   app.commandLine.appendSwitch("remote-debugging-port", "0");
   app.commandLine.appendSwitch("remote-allow-origins", "http://127.0.0.1");
   app.commandLine.appendSwitch("ignore-certificate-errors");

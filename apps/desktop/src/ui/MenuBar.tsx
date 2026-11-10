@@ -1,5 +1,6 @@
 import { Check } from "./icons";
 import { useEffect, useRef, useState } from "react";
+import { keys } from "../i18n";
 
 /** A classic application menu (Archivo, Editar, Ver…), drawn inside the window like VS Code on Linux. */
 
@@ -67,7 +68,7 @@ export function MenuBar(props: { menus: Menu[] }) {
                   >
                     <span className="mi-check">{it.checked ? <Check size={12} /> : null}</span>
                     <span className="mi-label">{it.label}</span>
-                    {it.shortcut ? <span className="mi-key">{it.shortcut}</span> : null}
+                    {it.shortcut ? <span className="mi-key">{keys(it.shortcut)}</span> : null}
                   </button>
                 ),
               )}

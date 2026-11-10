@@ -1,10 +1,11 @@
-// Builds the Linux packages:
+// Builds the packages for the system it runs on (Linux, or macOS on a Mac):
 //   1. the interface (vite)
 //   2. the core, bundled into build/core (JavaScript: the same for every architecture)
 //   3. per architecture, the one native module left (node-pty, the terminal), rebuilt for Electron
 //      into build/native-<arch>; if it cannot be built, that architecture ships without it and the
 //      terminal runs in its fallback mode (it never blocks a release)
-//   4. electron-builder: AppImage (static runtime, no libfuse2), .deb, .rpm and .tar.gz
+//   4. electron-builder: on Linux AppImage (static runtime, no libfuse2), .deb, .rpm and .tar.gz;
+//      on macOS a .zip per architecture, signed ad hoc (scripts/after-sign.cjs)
 //
 //   pnpm --filter @penteos/desktop package                      # this machine's architecture
 //   pnpm --filter @penteos/desktop package -- --arch x64,arm64  # several
@@ -29,7 +30,8 @@ const flag = (name, fallback) => {
 };
 const host = hostArch() === "arm64" ? "arm64" : "x64";
 const arches = flag("arch", [host]);
-const targets = flag("targets", ["AppImage", "deb", "rpm", "tar.gz"]);
+const mac = process.platform === "darwin";
+const targets = flag("targets", mac ? ["zip"] : ["AppImage", "deb", "rpm", "tar.gz"]);
 const requireApp = createRequire(join(app, "package.json"));
 const electronVersion = requireApp("electron/package.json").version;
 
@@ -60,8 +62,9 @@ for (const arch of arches) {
   // The compiler: the release image's (zig, against an old glibc: PENTEOS_CC_<arch>), else for
   // another architecture Debian's cross compiler, else this machine's.
   const saved = { CC: process.env.CC, CXX: process.env.CXX, LINK: process.env.LINK };
-  const cc = process.env[`PENTEOS_CC_${arch}`] ?? (arch !== host ? `${CROSS[arch]}-gcc` : undefined);
-  const cxx = process.env[`PENTEOS_CXX_${arch}`] ?? (arch !== host ? `${CROSS[arch]}-g++` : undefined);
+  // On a Mac, Apple's compiler builds for either architecture by itself.
+  const cc = process.env[`PENTEOS_CC_${arch}`] ?? (arch !== host && !mac ? `${CROSS[arch]}-gcc` : undefined);
+  const cxx = process.env[`PENTEOS_CXX_${arch}`] ?? (arch !== host && !mac ? `${CROSS[arch]}-g++` : undefined);
   if (cc && cxx) {
     process.env.CC = cc;
     process.env.CXX = cxx;
@@ -88,4 +91,4 @@ for (const arch of arches) {
 writeFileSync(join(app, "build", "native.json"), JSON.stringify(built, null, 2));
 
 console.log(`› packages (Electron ${electronVersion}; ${arches.join(", ")}; ${targets.join(", ")})`);
-run("pnpm", ["exec", "electron-builder", "--linux", ...targets, ...arches.map((a) => `--${a}`), "--publish", "never"]);
+run("pnpm", ["exec", "electron-builder", mac ? "--mac" : "--linux", ...targets, ...arches.map((a) => `--${a}`), "--publish", "never"]);

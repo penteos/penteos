@@ -14,8 +14,17 @@ exports.default = async function afterPack(context) {
   if (context.electronPlatformName === "linux") rootLauncher(context);
   const from = path.join(__dirname, "..", "build", `native-${arch}`, "node_modules");
   if (!existsSync(from)) return;
-  const to = path.join(context.appOutDir, "resources", "core", "node_modules");
+  // Linux: <app>/resources; macOS: <app>/Penteos.app/Contents/Resources.
+  const resources = context.electronPlatformName === "darwin" ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, "Contents", "Resources") : path.join(context.appOutDir, "resources");
+  const to = path.join(resources, "core", "node_modules");
   cpSync(from, to, { recursive: true, dereference: true });
+  // node-pty's spawn-helper (macOS) must stay executable, whatever the copy did with its mode.
+  if (context.electronPlatformName === "darwin") {
+    for (const dir of ["build/Release", "build/Debug"]) {
+      const helper = path.join(to, "node-pty", dir, "spawn-helper");
+      if (existsSync(helper)) chmodSync(helper, 0o755);
+    }
+  }
 };
 
 /**

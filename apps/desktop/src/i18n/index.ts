@@ -73,6 +73,18 @@ function fill(text: string, params?: Record<string, unknown>): string {
 }
 
 /** The text for a key in the operator's language; the key itself (and a console warning) if missing. */
+/** Running on a Mac (the desktop app, or a browser on one). */
+export const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || navigator.userAgent);
+
+/**
+ * Shortcuts as each system writes them: on a Mac "Ctrl+K" is ⌘K. Ctrl+` stays ⌃` there, because
+ * ⌘` belongs to macOS (it switches windows); the workbench accepts either key.
+ */
+export function keys(text: string): string {
+  if (!isMac) return text;
+  return text.replace(/Ctrl\+`/g, "⌃`").replace(/Ctrl\+Shift\+/g, "⇧⌘").replace(/Ctrl\+Enter/g, "⌘↩").replace(/Ctrl[+ ]/g, "⌘").replace(/Alt\+/g, "⌥");
+}
+
 export function t(key: string, params?: Record<string, unknown>): string {
   const text = lookup(key);
   if (text === undefined) {
@@ -82,7 +94,7 @@ export function t(key: string, params?: Record<string, unknown>): string {
     }
     return key;
   }
-  return fill(text, params);
+  return keys(fill(text, params));
 }
 
 /** Singular or plural: looks up `<key>.one` or `<key>.other`; `{n}` is the count. */

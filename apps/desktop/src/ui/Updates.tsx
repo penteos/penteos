@@ -10,7 +10,7 @@ export interface UpdateState {
   notes?: string;
   url?: string;
   /** How this copy was installed: what "Update" will do. */
-  kind?: "appimage" | "deb" | "rpm" | "manual";
+  kind?: "appimage" | "deb" | "rpm" | "mac" | "manual";
   progress?: number;
   error?: string;
   automatic?: boolean;

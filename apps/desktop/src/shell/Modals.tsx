@@ -6,7 +6,7 @@ import { ProjectWizard } from "../ProjectWizard";
 import { MODES } from "../modes";
 import { useApp } from "../state";
 import { Modal, toast } from "../ui/bits";
-import { t, tn } from "../i18n";
+import { keys as keyText, t, tn } from "../i18n";
 
 export function StopWorkModal(props: { onClose: () => void }) {
   const { engagement, client } = useApp();
@@ -74,7 +74,7 @@ export function HelpModal(props: { kind: "modes" | "keys" | "about"; onClose: ()
         </div>
       ) : props.kind === "keys" ? (
         <table className="tbl">
-          <tbody>{keys.map(([k, d]) => <tr key={k}><td className="mono" style={{ width: 150 }}>{k}</td><td>{d}</td></tr>)}</tbody>
+          <tbody>{keys.map(([k, d]) => <tr key={k}><td className="mono" style={{ width: 150 }}>{keyText(k)}</td><td>{d}</td></tr>)}</tbody>
         </table>
       ) : (
         <About />

@@ -11,7 +11,7 @@ import { RunsPanel, useRunningRuns } from "../panels/Runs";
 import { TerminalPanel } from "../panels/Terminal";
 import { type BottomTab, can, type EditorPanelId, type Entity, useApp, useOperation } from "../state";
 import { toast } from "../ui/bits";
-import { t, tn } from "../i18n";
+import { keys, t, tn } from "../i18n";
 
 import { BOTTOM, EDITOR, type Sizes } from "./registry";
 import { groupOf } from "./groups";
@@ -122,13 +122,13 @@ export function TopBar(props: { onStop: () => void; onNew: () => void; onOpen: (
       <button className="search-trigger" onClick={workbench.openPalette}>
         <Search size={13} />
         <span className="label">{t("shell.search.label")}</span>
-        <span className="kbd">Ctrl K</span>
+        <span className="kbd">{keys("Ctrl K")}</span>
       </button>
       <div className="topbar-spacer" />
-      <button className={`icon-btn ${props.sizes.bottomOpen ? "on" : ""}`} title={`${t("shell.view.bottomPanel")} (Ctrl+J)`} onClick={() => props.toggle("bottomOpen")}>
+      <button className={`icon-btn ${props.sizes.bottomOpen ? "on" : ""}`} title={`${t("shell.view.bottomPanel")}${keys(" (Ctrl+J)")}`} onClick={() => props.toggle("bottomOpen")}>
         <PanelBottom size={15} />
       </button>
-      <button className={`icon-btn ${props.sizes.agentOpen ? "on" : ""}`} title={`${t("shell.view.agent")} (Ctrl+L)`} onClick={() => props.toggle("agentOpen")}>
+      <button className={`icon-btn ${props.sizes.agentOpen ? "on" : ""}`} title={`${t("shell.view.agent")}${keys(" (Ctrl+L)")}`} onClick={() => props.toggle("agentOpen")}>
         <PanelRight size={15} />
       </button>
       <div className="controls">

@@ -1,6 +1,7 @@
 // The core of an installed Penteos, end to end, on a clean data folder:
 // project, scope, finding, catalog plugins (declarative, Node code, Python), reports, export.
 //   ELECTRON_RUN_AS_NODE=1 /opt/Penteos/penteos scripts/release/e2e-core.mjs /opt/Penteos [--offline]
+//   ELECTRON_RUN_AS_NODE=1 ~/Applications/Penteos.app/Contents/MacOS/Penteos scripts/release/e2e-core.mjs ~/Applications/Penteos.app
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,8 +17,12 @@ const data = mkdtempSync(join(tmpdir(), "penteos-pkg-"));
 // The agents' browser is the app itself in its agent-browser mode, as the desktop app sets it up
 // (PENTEOS_E2E_BROWSER_ARGS: extra flags for the test environment, e.g. --no-sandbox as root).
 const browserArgs = (process.env.PENTEOS_E2E_BROWSER_ARGS ?? "").split(" ").filter(Boolean);
-const env = { ...process.env, ELECTRON_RUN_AS_NODE: "1", PENTEOS_AGENT_BROWSER: JSON.stringify({ command: join(app, "penteos"), args: browserArgs }) };
-const core = spawn(join(app, "penteos"), [join(app, "resources/core/core.mjs"), "--data-dir", data], { cwd: join(app, "resources/core"), env, stdio: ["ignore", "pipe", "pipe"] });
+// Linux: <app>/penteos and <app>/resources. macOS: Penteos.app/Contents/MacOS/Penteos and Contents/Resources.
+const mac = app.endsWith(".app");
+const bin = mac ? join(app, "Contents/MacOS/Penteos") : join(app, "penteos");
+const resources = mac ? join(app, "Contents/Resources") : join(app, "resources");
+const env = { ...process.env, ELECTRON_RUN_AS_NODE: "1", PENTEOS_AGENT_BROWSER: JSON.stringify({ command: bin, args: browserArgs }) };
+const core = spawn(bin, [join(resources, "core/core.mjs"), "--data-dir", data], { cwd: join(resources, "core"), env, stdio: ["ignore", "pipe", "pipe"] });
 let err = "";
 core.stderr.on("data", (d) => (err += d));
 const ready = await new Promise((res, rej) => {

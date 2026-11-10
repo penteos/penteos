@@ -35,7 +35,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ONLY: ${{ github.event.inputs.only || 'subfinder,dnsx,httpx,nuclei,katana,interactsh-client,ffuf,gobuster,uv' }}
-        run: pnpm exec tsx scripts/tools/refresh-catalog.mjs ${ONLY:+--only "$ONLY"}
+        # tsx comes with the server package; the script finds the repository from its own path.
+        run: pnpm --filter @penteos/server exec tsx "$GITHUB_WORKSPACE/scripts/tools/refresh-catalog.mjs" ${ONLY:+--only "$ONLY"}
       - uses: actions/upload-artifact@v7
         with:
           name: catalog-data

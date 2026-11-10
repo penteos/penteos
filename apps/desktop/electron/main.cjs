@@ -21,7 +21,7 @@ if (process.argv.some((a) => a.startsWith("--penteos-agent-browser="))) {
   require("./agent-browser-host.cjs").run();
   return;
 }
-const { app, BrowserWindow, dialog, ipcMain, screen, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, screen, session, shell } = require("electron");
 // Screenshot mode, to review the interface from a script: only when running from the repository,
 // never in an installed app (it can run JavaScript given in a variable).
 const SHOT = !app.isPackaged ? process.env.PENTEOS_SCREENSHOT : undefined;
@@ -571,7 +571,24 @@ function integrateAppImage() {
 }
 
 
-app.whenReady().then(() => { pathReady = adoptShellPath().catch(() => undefined); pinCertificate(); integrateAppImage(); warnLowDisk(); return createWindow(); }).catch((error) => {
+/**
+ * macOS: the app's own menu bar. Without one Electron shows its default (with Reload and the
+ * developer tools); and the Edit menu's roles are what make ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z work in text
+ * fields. ⌘W is left to the workbench (it closes a tab, not the window). Elsewhere the workbench
+ * draws its own menu inside the window.
+ */
+function macMenu() {
+  if (process.platform !== "darwin") return;
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      { label: "Penteos", submenu: [{ role: "about" }, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" }, { type: "separator" }, { role: "quit" }] },
+      { role: "editMenu" },
+      { label: "Window", submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "togglefullscreen" }, { type: "separator" }, { role: "front" }] },
+    ]),
+  );
+}
+
+app.whenReady().then(() => { pathReady = adoptShellPath().catch(() => undefined); macMenu(); pinCertificate(); integrateAppImage(); warnLowDisk(); return createWindow(); }).catch((error) => {
   console.error(error);
   return startFailed(error);
 });

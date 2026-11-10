@@ -114,6 +114,21 @@
         }
       }
     },
+    "mac": {
+      "target": [
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build-resources/icon.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "artifactName": "penteos-${version}-mac-${arch}.${ext}",
+      "extendInfo": {
+        "NSHumanReadableCopyright": "© 2026 Santiago Habib",
+        "LSApplicationCategoryType": "public.app-category.developer-tools"
+      }
+    },
     "deb": {
       "depends": [
         "libgtk-3-0t64 | libgtk-3-0",
@@ -160,7 +175,8 @@
     },
     "appImage": {
       "artifactName": "penteos-${version}-${arch}.AppImage"
-    }
+    },
+    "afterSign": "scripts/after-sign.cjs"
   },
   "desktopName": "penteos.desktop"
 }
