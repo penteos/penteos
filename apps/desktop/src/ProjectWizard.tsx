@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, Bot, Check, Crown, Plus, Crosshair, FlaskConical, GitCompareArrows, Globe, LayoutGrid, Network, RotateCcw, Shield, User, Users, X, Mark, Puzzle } from "./ui/icons";
-import { usePluginCatalog } from "./ui/plugins";
+import { ptext, usePluginCatalog } from "./ui/plugins";
 import { type ReactNode, useEffect, useState } from "react";
 import { MODE_ORDER, MODES, type ModeId } from "./modes";
 import type { Provider } from "./panels/AgentSidebar";
@@ -442,7 +442,7 @@ export function ProjectWizard(props: { firstRun: boolean; onClose: () => void })
                     <input type="checkbox" checked={chosenPlugins.includes(p.id)} onChange={(e) => setChosenPlugins((cur) => (e.target.checked ? [...cur, p.id] : cur.filter((x) => x !== p.id)))} />
                     <span>
                       <b>{p.name}</b>
-                      {p.description ? <span className="muted"> · {p.description}</span> : null}
+                      {p.description ? <span className="muted"> · {ptext(p.description)}</span> : null}
                       {p.sendsTo.length ? <span className="wizard-plugin-warn">{t("plugins.sendsTo", { hosts: p.sendsTo.join(", ") })}</span> : null}
                     </span>
                   </label>

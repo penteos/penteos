@@ -4,6 +4,13 @@ All notable changes to Penteos are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-11-10
+
+- **New project with plugins installed.** The last step of the new project wizard no longer
+  leaves an empty window when an installed plugin describes itself in two languages: it shows the
+  description in your language. If a part of the window ever fails to draw, it now says what
+  failed and offers to retry instead of going blank.
+
 ## [0.1.1] - 2026-11-10
 
 - **Updates.** Penteos checks for a newer release when it starts and every few hours (one

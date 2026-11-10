@@ -532,3 +532,4 @@ body, #root { font-feature-settings: "ss01", "cv11"; }
 /* Privacy towards the model, in the run tab. */
 .metrics .pv-switch { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 12px; }
 .metrics section h2 svg { vertical-align: -2px; margin-right: 4px; color: #9d8cff; }
+#root > .error-boundary { min-height: 100vh; }

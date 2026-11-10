@@ -358,6 +358,27 @@ for (const section of sections) {
   const okMenu = ext === "SSH con banner viejo" && shown && prefilled === "10.0.0.5";
   if (!okMenu) failed++;
   console.log(`${okMenu ? "ok " : "FAIL"} plugins: annotation on the host (${ext ?? "none"}), shown ${shown}, entity menu prefilled (${prefilled || "empty"})`);
+
+  // New project with plugins installed: the last step offers them, each description in one
+  // language (a description written in both once blanked the whole window here).
+  await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true }))`);
+  await sleep(500);
+  await evaluate(`document.querySelector('.wizard .choice')?.click()`);
+  await sleep(300);
+  const inputs = await evaluate(`(() => { const els = [...document.querySelectorAll('.wizard input.input')]; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; [["Lab", 0], ["Wizard smoke", 1]].forEach(([v, i]) => { if (els[i]) { set.call(els[i], v); els[i].dispatchEvent(new Event("input", { bubbles: true })); } }); return els.length; })()`);
+  await sleep(200);
+  await evaluate(`document.querySelector('.wizard .btn.primary')?.click()`);
+  await sleep(800);
+  const wizardPlugins = await evaluate(`[...document.querySelectorAll('.wizard-plugin')].map((p) => p.textContent)`);
+  const rendered = await evaluate(`Boolean(document.querySelector('.wizard-card')) && !document.querySelector('.error-boundary')`);
+  writeFileSync(join(out, "wizard-plugins.png"), Buffer.from((await send("Page.captureScreenshot", { format: "png" })).result.data, "base64"));
+  const panelText = wizardPlugins.find((p) => p.includes("Panel (lab)")) ?? "";
+  const oneLanguage = /Plugin de código de laboratorio con paneles\.|Lab code plugin with panels\./.test(panelText) && !(panelText.includes("Plugin de código") && panelText.includes("Lab code plugin"));
+  const okWizard = inputs >= 2 && rendered && oneLanguage;
+  if (!okWizard) failed++;
+  console.log(`${okWizard ? "ok " : "FAIL"} new project: plugins step ${rendered ? "rendered" : "blank"}, ${wizardPlugins.length} plugin(s) offered, description ${oneLanguage ? "in one language" : `wrong (${panelText || "missing"})`}`);
+  await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
+  await sleep(300);
 }
 // The catalog: the ready-made plugins are offered; Jira installs from the interface with one
 // approval, and once enabled in the project its action shows on a finding.

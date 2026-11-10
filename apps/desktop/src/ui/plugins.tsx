@@ -110,7 +110,7 @@ export interface CatalogPlugin {
   name: string;
   version: string;
   author: { type: "human" | "maestro"; name?: string };
-  description?: string;
+  description?: PText;
   permissions: string[];
   sendsTo: string[];
   operations: CatalogOperation[];

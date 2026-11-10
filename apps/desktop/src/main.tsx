@@ -2,13 +2,20 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { CoreClient } from "./client";
 import "./styles.css";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { reportErrorsTo } from "./ui/reportError";
 
 const params = new URLSearchParams(location.search);
 const client = new CoreClient(params.get("url") ?? params.get("port") ?? "", params.get("token") ?? "");
 reportErrorsTo(client);
 
-createRoot(document.getElementById("root")!).render(<App client={client} />);
+// The last line of defence: a render error anywhere shows what failed and a way back, never an
+// empty window (each panel also has its own boundary, so this one is only reached from the shell).
+createRoot(document.getElementById("root")!).render(
+  <ErrorBoundary area="window">
+    <App client={client} />
+  </ErrorBoundary>,
+);
 
 // In the desktop app the splash is its own small window (electron/splash): the page's copy is only
 // for the browser. Either way the workbench says when it is connected to the core.
