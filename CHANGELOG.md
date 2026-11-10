@@ -4,7 +4,7 @@ All notable changes to Penteos are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-11-10
 
 The first public release: the AI pentest workbench. Recon to report in one place, with an agent
 that stays in scope and masks your client's data before the AI reads it.

@@ -20,6 +20,18 @@ for arg in "$@"; do
   esac
 done
 
+# The banner: PENTEOS in the brand's colours (violet to torch orange), only on a terminal.
+banner() {
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then c() { printf '\033[38;5;%sm%s\033[0m\n' "$1" "$2"; }; else c() { printf '%s\n' "$2"; }; fi
+  printf '\n'
+  c 141 '   ____   _____  _   _  _____  _____   ___   ____'
+  c 135 '  |  _ \ | ____|| \ | ||_   _|| ____| / _ \ / ___|'
+  c 171 '  | |_) ||  _|  |  \| |  | |  |  _|  | | | |\___ \'
+  c 209 '  |  __/ | |___ | |\  |  | |  | |___ | |_| | ___) |'
+  c 208 '  |_|    |_____||_| \_|  |_|  |_____| \___/ |____/'
+  printf '\n'
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then printf '  \033[38;5;208m>*\033[0m \033[1mthe AI pentest workbench\033[0m  \033[2m%s\033[0m\n\n' "$1"; else printf '  >* the AI pentest workbench  %s\n\n' "$1"; fi
+}
 say() { printf '\033[1;35mpenteos\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31mpenteos\033[0m %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1; }
@@ -38,6 +50,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 fetch "$BASE/VERSION" "$TMP/VERSION" || fail "could not look up the latest version at $BASE"
 VERSION="$(tr -d ' \n\r' < "$TMP/VERSION")"
+banner "v$VERSION"
 fetch "$BASE/SHA256SUMS" "$TMP/SHA256SUMS" || fail "could not download the checksums"
 
 # The privilege to install system packages: root, or sudo.
