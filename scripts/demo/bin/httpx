@@ -1,0 +1,10 @@
+#!/bin/sh
+# Demo stand-in (screenshots only): canned output for the fictional acme-corp.test network. No network.
+for a in "$@"; do [ "$a" = "-version" ] && { echo "Current Version: v1.7.0"; exit 0; }; done
+cat <<'OUT'
+{"url": "https://www.acme-corp.test", "host": "203.0.113.10", "title": "Acme Corp \u2014 Industrial supplies", "webserver": "nginx/1.18.0", "tech": ["Next.js", "React", "Nginx:1.18.0"], "status_code": 200}
+{"url": "https://app.acme-corp.test", "host": "203.0.113.11", "title": "Acme Portal \u2014 Sign in", "webserver": "nginx/1.18.0", "tech": ["React", "Nginx:1.18.0"], "status_code": 200}
+{"url": "https://api.acme-corp.test", "host": "203.0.113.12", "title": "", "webserver": "", "tech": ["Express", "Node.js"], "status_code": 404}
+{"url": "https://vpn.acme-corp.test", "host": "203.0.113.13", "title": "FortiGate SSL VPN", "webserver": "", "tech": ["Fortinet FortiGate"], "status_code": 200}
+{"url": "http://staging.acme-corp.test:8080", "host": "203.0.113.14", "title": "Dashboard [Jenkins]", "webserver": "Jetty(9.4.43.v20210629)", "tech": ["Jenkins:2.303.1", "Jetty:9.4.43"], "status_code": 200}
+OUT

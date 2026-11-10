@@ -1,0 +1,158 @@
+{
+  "id": "penteos.shodan",
+  "name": "Shodan",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "engine": ">=0.1.0",
+  "level": "declarative",
+  "author": { "type": "human", "name": "Penteos" },
+  "description": {
+    "es": "Enriquece hosts con lo que Shodan ya sabe de ellos: puertos abiertos, banners, organización y CVE conocidos. Es pasivo: no toca el objetivo, pero envía su IP a Shodan.",
+    "en": "Enriches hosts with what Shodan already knows about them: open ports, banners, organisation and known CVEs. Passive: it does not touch the target, but it sends its IP to Shodan."
+  },
+  "permissions": ["net:api.shodan.io", "graph:read", "graph:write", "ui:menu"],
+  "contributes": {
+    "settings": [
+      {
+        "name": "apiKey",
+        "type": "string",
+        "secret": true,
+        "required": true,
+        "label": { "es": "Clave de API", "en": "API key" },
+        "help": { "es": "La de su cuenta, en account.shodan.io.", "en": "From your account, at account.shodan.io." }
+      },
+      {
+        "name": "autoLookup",
+        "type": "boolean",
+        "default": false,
+        "label": { "es": "Consultar cada host nuevo con IP pública", "en": "Look up every new host with a public IP" },
+        "help": { "es": "En los proyectos donde esté habilitado. Cada consulta envía la IP a Shodan.", "en": "In the projects where it is enabled. Each lookup sends the IP to Shodan." }
+      }
+    ],
+    "entityTypes": [
+      {
+        "name": "banner",
+        "label": { "es": "Banner (Shodan)", "en": "Banner (Shodan)" },
+        "description": { "es": "Un servicio que Shodan vio expuesto en una IP, con su banner.", "en": "A service Shodan saw exposed on an IP, with its banner." },
+        "fields": [
+          { "name": "ip", "type": "host", "required": true, "label": "IP" },
+          { "name": "port", "type": "integer", "required": true, "min": 0, "max": 65535, "label": { "es": "Puerto", "en": "Port" } },
+          { "name": "transport", "type": "string", "max": 10 },
+          { "name": "product", "type": "string", "max": 200, "label": { "es": "Producto", "en": "Product" } },
+          { "name": "version", "type": "string", "max": 100, "label": { "es": "Versión", "en": "Version" } },
+          { "name": "module", "type": "string", "max": 60 },
+          { "name": "banner", "type": "text", "max": 4000 },
+          { "name": "seenAt", "type": "string", "max": 40, "label": { "es": "Visto", "en": "Seen" } }
+        ],
+        "key": ["ip", "port"],
+        "title": "product",
+        "target": "ip"
+      }
+    ],
+    "annotations": [
+      {
+        "on": ["host"],
+        "fields": [
+          { "name": "org", "type": "string", "label": { "es": "Organización", "en": "Organisation" } },
+          { "name": "isp", "type": "string", "label": "ISP" },
+          { "name": "asn", "type": "string", "label": "ASN" },
+          { "name": "os", "type": "string", "label": { "es": "Sistema", "en": "OS" } },
+          { "name": "country", "type": "string", "label": { "es": "País", "en": "Country" } },
+          { "name": "ports", "type": "json", "label": { "es": "Puertos", "en": "Ports" } },
+          { "name": "vulns", "type": "json", "label": "CVE" },
+          { "name": "hostnames", "type": "json", "label": "Hostnames" },
+          { "name": "lastUpdate", "type": "string", "label": { "es": "Actualizado en Shodan", "en": "Updated in Shodan" } }
+        ]
+      }
+    ],
+    "operations": [
+      {
+        "name": "lookup",
+        "title": { "es": "Consultar en Shodan", "en": "Look up in Shodan" },
+        "description": {
+          "es": "Busca una IP pública en Shodan (pasivo: no se contacta al objetivo) y registra en el host sus puertos abiertos, banners, organización y CVE conocidos.",
+          "en": "Looks up a public IP in Shodan (passive: the target is not contacted) and records on the host its open ports, banners, organisation and known CVEs. Use it on public IPs before scanning them; Shodan's CVEs are leads to confirm, not findings."
+        },
+        "input": [{ "name": "ip", "type": "host", "required": true, "label": "IP", "placeholder": "203.0.113.10" }],
+        "steps": [
+          { "do": "fail", "if": "{{input.ip | private_ip}}", "message": "{{input.ip}} is a private address: Shodan only knows public ones" },
+          { "do": "http", "id": "r", "url": "https://api.shodan.io/shodan/host/{{input.ip}}", "query": { "key": "{{settings.apiKey}}" }, "expect": [200, 404], "timeoutMs": 20000 },
+          { "do": "fail", "if": "{{steps.r.status | eq:404}}", "message": "Shodan has no information about {{input.ip}}" },
+          { "do": "graph_query", "id": "hosts", "kind": "host", "text": "{{input.ip}}", "limit": 20 },
+          { "do": "set", "vars": { "host": "{{steps.hosts | where:'attributes.ip':input.ip | first}}" } },
+          {
+            "do": "each",
+            "id": "banners",
+            "over": "{{steps.r.body.data}}",
+            "as": "svc",
+            "max": 200,
+            "steps": [
+              {
+                "do": "put",
+                "type": "banner",
+                "attributes": {
+                  "ip": "{{input.ip}}",
+                  "port": "{{svc.port}}",
+                  "transport": "{{svc.transport}}",
+                  "product": "{{svc.product}}",
+                  "version": "{{svc.version | string}}",
+                  "module": "{{svc._shodan.module}}",
+                  "banner": "{{svc.data | slice:0:4000}}",
+                  "seenAt": "{{svc.timestamp}}"
+                },
+                "relate": "{{vars.host.id}}"
+              }
+            ],
+            "collect": "{{svc.port}}"
+          },
+          {
+            "do": "annotate",
+            "if": "{{vars.host}}",
+            "entity": "{{vars.host.id}}",
+            "data": {
+              "org": "{{steps.r.body.org}}",
+              "isp": "{{steps.r.body.isp}}",
+              "asn": "{{steps.r.body.asn}}",
+              "os": "{{steps.r.body.os}}",
+              "country": "{{steps.r.body.country_name}}",
+              "ports": "{{steps.r.body.ports}}",
+              "vulns": "{{steps.r.body.vulns}}",
+              "hostnames": "{{steps.r.body.hostnames}}",
+              "lastUpdate": "{{steps.r.body.last_update}}"
+            }
+          }
+        ],
+        "result": {
+          "ip": "{{input.ip}}",
+          "org": "{{steps.r.body.org}}",
+          "ports": "{{steps.r.body.ports | sort}}",
+          "vulns": "{{steps.r.body.vulns}}",
+          "banners": "{{steps.banners | length}}",
+          "onHost": "{{vars.host | exists}}"
+        },
+        "view": {
+          "type": "card",
+          "fields": [
+            { "field": "ip", "label": "IP" },
+            { "field": "org", "label": { "es": "Organización", "en": "Organisation" } },
+            { "field": "ports", "label": { "es": "Puertos", "en": "Ports" } },
+            { "field": "vulns", "label": { "es": "CVE conocidos", "en": "Known CVEs" } },
+            { "field": "banners", "label": { "es": "Banners guardados", "en": "Banners saved" } }
+          ]
+        }
+      }
+    ],
+    "menus": [
+      { "id": "lookup_host", "title": { "es": "Consultar en Shodan", "en": "Look up in Shodan" }, "operation": "lookup", "where": "entity", "kinds": ["host"], "prefill": { "ip": "{{entity.attributes.ip}}" } },
+      { "id": "lookup", "title": { "es": "Consultar una IP", "en": "Look up an IP" }, "operation": "lookup", "where": "plugins" }
+    ],
+    "events": [
+      {
+        "on": "host.created",
+        "operation": "lookup",
+        "when": "{{event.entity.attributes.ip | private_ip | not | and:settings.autoLookup}}",
+        "input": { "ip": "{{event.entity.attributes.ip}}" }
+      }
+    ]
+  }
+}

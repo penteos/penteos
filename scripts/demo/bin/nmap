@@ -1,0 +1,34 @@
+#!/bin/sh
+for a in "$@"; do [ "$a" = "--version" ] && { echo "Nmap version 7.95 ( https://nmap.org )"; exit 0; }; done
+# Demo stand-in for nmap (screenshots only): prints a believable scan of the fictional
+# acme-corp.test network and writes the XML Penteos parses. It sends no packets.
+xml=""
+prev=""
+for a in "$@"; do [ "$prev" = "-oX" ] && xml="$a"; prev="$a"; done
+cat <<'OUT'
+Starting Nmap 7.95 ( https://nmap.org )
+Initiating Connect Scan
+Discovered open port 443/tcp on 203.0.113.10
+Discovered open port 80/tcp on 203.0.113.10
+Discovered open port 443/tcp on 203.0.113.11
+Discovered open port 22/tcp on 203.0.113.13
+Discovered open port 21/tcp on 203.0.113.14
+Discovered open port 8080/tcp on 203.0.113.14
+Nmap scan report for www.acme-corp.test (203.0.113.10)
+PORT    STATE SERVICE  VERSION
+80/tcp  open  http     nginx 1.18.0
+443/tcp open  ssl/http nginx 1.18.0
+Nmap done: 16 IP addresses (5 hosts up) scanned in 41.37 seconds
+OUT
+[ -n "$xml" ] || exit 0
+svc() { echo "<port protocol=\"tcp\" portid=\"$1\"><state state=\"open\" reason=\"syn-ack\"/><service name=\"$2\" product=\"$3\" version=\"$4\" $5/></port>"; }
+host() { echo "<host><status state=\"up\"/><address addr=\"$1\" addrtype=\"ipv4\"/><hostnames><hostname name=\"$2\" type=\"PTR\"/></hostnames><ports>"; }
+{
+  echo '<?xml version="1.0"?><nmaprun scanner="nmap" args="nmap -sV 203.0.113.0/28" version="7.95">'
+  host 203.0.113.10 www.acme-corp.test; svc 80 http nginx 1.18.0; svc 443 http nginx 1.18.0 'tunnel="ssl"'; echo '</ports></host>'
+  host 203.0.113.11 app.acme-corp.test; svc 443 http nginx 1.18.0 'tunnel="ssl"'; echo '</ports></host>'
+  host 203.0.113.12 api.acme-corp.test; svc 443 http "Node.js Express framework" "" 'tunnel="ssl"'; echo '</ports></host>'
+  host 203.0.113.13 vpn.acme-corp.test; svc 22 ssh OpenSSH 8.2p1 ""; svc 443 http "Fortinet SSL VPN" "" 'tunnel="ssl"'; echo '</ports></host>'
+  host 203.0.113.14 staging.acme-corp.test; svc 21 ftp vsftpd 3.0.3 ""; svc 22 ssh OpenSSH 7.6p1 ""; svc 8080 http Jetty 9.4.43 ""; echo '</ports></host>'
+  echo '<runstats><finished elapsed="41.37"/><hosts up="5" down="11" total="16"/></runstats></nmaprun>'
+} > "$xml"

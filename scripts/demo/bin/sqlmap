@@ -1,0 +1,20 @@
+#!/bin/sh
+for a in "$@"; do [ "$a" = "--version" ] && { echo "1.9.4#stable"; exit 0; }; done
+# Demo stand-in for sqlmap (screenshots only): no network.
+cat <<'OUT'
+[*] starting
+[INFO] testing connection to the target URL
+[INFO] testing if GET parameter 'id' is dynamic
+[INFO] GET parameter 'id' appears to be 'PostgreSQL AND boolean-based blind - WHERE or HAVING clause' injectable
+[INFO] GET parameter 'id' is 'PostgreSQL > 8.1 stacked queries (comment)' injectable
+GET parameter 'id' is vulnerable.
+---
+Parameter: id (GET)
+    Type: boolean-based blind
+    Title: PostgreSQL AND boolean-based blind - WHERE or HAVING clause
+    Payload: id=1042 AND 7311=7311
+---
+[INFO] the back-end DBMS is PostgreSQL
+back-end DBMS: PostgreSQL 13
+[*] ending
+OUT

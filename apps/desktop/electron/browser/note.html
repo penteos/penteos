@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src 'self'">
+<style>
+  @font-face { font-family: "Geist"; src: url("fonts/geist.woff2") format("woff2"); font-weight: 100 900; }
+  @font-face { font-family: "Geist Mono"; src: url("fonts/geist-mono.woff2") format("woff2"); font-weight: 100 900; }
+  :root { color-scheme: dark; --fg0: #f4f2f8; --fg1: #c9c5d3; --fg2: #8d8799; --fg3: #5f596b; --violet: #9d8cff; --amber: #e3a857; --ok: #6cc69a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #0c0a10; overflow: hidden; }
+  body { font: 13px "Geist", system-ui, sans-serif; color: var(--fg1); -webkit-user-select: none; }
+
+  /* The Maestro's request: the decision frame of the app, as one compact band across the browser. */
+  .note { position: relative; isolation: isolate; display: grid; grid-template-columns: 172px minmax(0, 1fr) auto; align-items: stretch; background: #0f0c13; }
+  /* Bottom edge: half violet, half amber, like every card that asks the operator for something. */
+  .note::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(90deg, var(--violet) 0%, var(--violet) 38%, var(--amber) 62%, var(--amber) 100%); }
+  /* A grid that fades out from the left, and a soft light behind the mark. */
+  .note::before {
+    content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background-image: linear-gradient(rgba(157, 140, 255, .07) 1px, transparent 1px), linear-gradient(90deg, rgba(157, 140, 255, .07) 1px, transparent 1px);
+    background-size: 12px 12px;
+    -webkit-mask-image: radial-gradient(420px 120px at 0% 0%, #000, transparent);
+  }
+  .glow { position: absolute; left: -60px; top: -80px; width: 280px; height: 170px; z-index: -1; pointer-events: none; background: conic-gradient(from 210deg, rgba(124, 108, 240, 0), rgba(124, 108, 240, .4), rgba(227, 168, 87, .2), rgba(124, 108, 240, 0) 62%); filter: blur(40px); opacity: .5; }
+
+  /* Left: who asks, and what the proxy recorded so far. */
+  .rail { padding: 9px 14px; border-right: 1px solid rgba(255, 255, 255, .06); display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+  .who { display: flex; align-items: center; gap: 7px; }
+  .who svg { width: 14px; height: 14px; fill: none; stroke: url(#g); stroke-width: 1.7; stroke-linejoin: miter; stroke-linecap: square; }
+  .who .name { color: var(--fg0); font-weight: 600; font-size: 12.5px; }
+  .who .kick { font: 10px "Geist Mono", monospace; color: var(--fg3); letter-spacing: .04em; }
+  .tally { display: flex; align-items: baseline; gap: 6px; }
+  .count { font: 400 20px/1 "Geist Mono", monospace; color: var(--fg0); letter-spacing: -.02em; }
+  .count-l { font-size: 11px; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Middle: what to do - a title and the steps in a row. */
+  .body { padding: 9px 18px; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 5px; }
+  .head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .title { font-size: 13.5px; font-weight: 600; color: var(--fg0); letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
+  .url { font: 11px "Geist Mono", monospace; color: var(--fg3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 2; min-width: 60px; }
+  .steps { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 3px 18px; }
+  .steps li { display: flex; gap: 6px; color: var(--fg1); font-size: 12px; line-height: 1.4; min-width: 0; }
+  .steps .n { font: 10.5px "Geist Mono", monospace; color: var(--violet); padding-top: 1px; flex-shrink: 0; }
+
+  /* Right: the decision, side by side. White first, transparent second, flat. */
+  .actions { padding: 9px 14px; display: flex; align-items: center; gap: 6px; border-left: 1px solid rgba(255, 255, 255, .06); }
+  button { height: 28px; padding: 0 12px; border-radius: 2px; font: 500 12px "Geist", system-ui, sans-serif; cursor: pointer; white-space: nowrap; }
+  .primary { background: #f4f2f8; border: 1px solid #f4f2f8; color: #110e16; font-weight: 600; }
+  .primary:hover { background: #fff; }
+  .quiet { background: transparent; border: 1px solid rgba(255, 255, 255, .14); color: var(--fg1); }
+  .quiet:hover { border-color: rgba(255, 255, 255, .32); color: var(--fg0); }
+
+  /* Collapsed: one line, still the same frame. */
+  .slim { display: none; position: relative; isolation: isolate; height: 34px; align-items: center; gap: 12px; padding: 0 12px 0 14px; background: #0f0c13; }
+  .slim::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(90deg, var(--violet) 0%, var(--violet) 38%, var(--amber) 62%, var(--amber) 100%); }
+  .slim svg { width: 15px; height: 15px; fill: none; stroke: url(#g); stroke-width: 1.6; stroke-linejoin: miter; flex-shrink: 0; }
+  .slim .t { flex: 1; min-width: 0; color: var(--fg0); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slim .c { font: 12px "Geist Mono", monospace; color: var(--fg1); white-space: nowrap; }
+  .slim button { height: 24px; padding: 0 10px; font-size: 12px; }
+  body.collapsed .note { display: none; }
+  body.collapsed .slim { display: flex; }
+
+  /* Sent: the frame turns quiet and says so. */
+  .sent { display: none; align-items: center; gap: 10px; height: 34px; padding: 0 16px; background: #0f0c13; color: var(--fg0); position: relative; }
+  .sent::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--ok); opacity: .7; }
+  .sent svg { width: 15px; height: 15px; fill: none; stroke: var(--ok); stroke-width: 1.8; stroke-linecap: square; stroke-linejoin: miter; }
+  body.done .note, body.done .slim { display: none; }
+  body.done .sent { display: flex; }
+</style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c9c1ff"/><stop offset=".55" stop-color="#9d8cff"/><stop offset="1" stop-color="#e3a857"/></linearGradient></defs>
+  </svg>
+
+  <section class="note" id="note">
+    <div class="glow"></div>
+    <div class="rail">
+      <div class="who">
+        <svg viewBox="0 0 24 24"><path d="M4 18l2-10 4 4 2-6 2 6 4-4 2 10z M4 21h16"/></svg>
+        <span class="name" id="name">Maestro</span>
+        <span class="kick" id="kick"></span>
+      </div>
+      <div class="tally"><span class="count" id="count">000</span><span class="count-l" id="countLabel"></span></div>
+    </div>
+    <div class="body">
+      <div class="head"><span class="title" id="title"></span><span class="url" id="url"></span></div>
+      <ol class="steps" id="steps"></ol>
+    </div>
+    <div class="actions">
+      <button class="primary" id="done"></button>
+      <button class="quiet" id="hide"></button>
+    </div>
+  </section>
+
+  <section class="slim" id="slim">
+    <svg viewBox="0 0 24 24"><path d="M4 18l2-10 4 4 2-6 2 6 4-4 2 10z M4 21h16"/></svg>
+    <span class="t" id="slimTitle"></span>
+    <span class="c" id="slimCount"></span>
+    <button class="quiet" id="show"></button>
+    <button class="primary" id="slimDone"></button>
+  </section>
+
+  <section class="sent" id="sent">
+    <svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+    <span id="sentText"></span>
+  </section>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let labels = {};
+  const pad = (n) => String(n).padStart(3, "0");
+  // The browser view grows to fit the note: tell the window how tall it is.
+  const report = () => window.note.height(Math.ceil(document.body.getBoundingClientRect().height));
+  new ResizeObserver(report).observe(document.body);
+
+  function render(n) {
+    labels = n.labels || labels;
+    $("name").textContent = labels.maestro || "Maestro";
+    $("kick").textContent = labels.kicker || "";
+    $("countLabel").textContent = labels.counterShort || "";
+    $("countLabel").title = labels.counter || "";
+    $("done").textContent = labels.done || "";
+    $("slimDone").textContent = labels.done || "";
+    $("hide").textContent = labels.hide || "";
+    $("show").textContent = labels.show || "";
+    $("title").textContent = n.title || "";
+    $("slimTitle").textContent = n.title || "";
+    $("url").textContent = n.url || "";
+    const steps = $("steps");
+    steps.textContent = "";
+    (n.steps || []).forEach((s, i) => {
+      const li = document.createElement("li");
+      const num = document.createElement("span");
+      num.className = "n";
+      num.textContent = String(i + 1).padStart(2, "0");
+      const text = document.createElement("span");
+      text.textContent = s;
+      li.append(num, text);
+      steps.append(li);
+    });
+    progress(n.exchanges || 0, n.hosts || []);
+    document.body.classList.remove("done", "collapsed");
+    report();
+  }
+
+  function progress(count, hosts) {
+    $("count").textContent = pad(count);
+    $("slimCount").textContent = `${pad(count)} ${labels.counterShort || ""}`;
+    $("count").title = hosts.join("\n");
+  }
+
+  $("done").onclick = $("slimDone").onclick = () => window.note.action("done");
+  $("hide").onclick = () => { document.body.classList.add("collapsed"); report(); window.note.action("collapse"); };
+  $("show").onclick = () => { document.body.classList.remove("collapsed"); report(); window.note.action("expand"); };
+
+  window.note.onShow((n) => render(n));
+  window.note.onProgress((p) => progress(p.exchanges || 0, p.hosts || []));
+  window.note.onExpand(() => { document.body.classList.remove("collapsed"); report(); });
+  window.note.onSent((text) => { $("sentText").textContent = text || ""; document.body.classList.add("done"); report(); });
+</script>
+</body>
+</html>

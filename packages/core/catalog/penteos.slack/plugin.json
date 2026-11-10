@@ -1,0 +1,87 @@
+{
+  "id": "penteos.slack",
+  "name": "Slack",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "engine": ">=0.1.0",
+  "level": "declarative",
+  "author": { "type": "human", "name": "Penteos" },
+  "description": {
+    "es": "Avisa en un canal de Slack cuando aparece un hallazgo grave, y permite mandar un hallazgo o un mensaje a mano. Envía el título y la severidad a Slack.",
+    "en": "Posts to a Slack channel when a serious finding shows up, and lets you send a finding or a message by hand. Sends the title and severity to Slack."
+  },
+  "permissions": ["net:hooks.slack.com", "graph:read", "ui:menu"],
+  "contributes": {
+    "settings": [
+      {
+        "name": "webhook",
+        "type": "string",
+        "secret": true,
+        "required": true,
+        "label": { "es": "Webhook entrante", "en": "Incoming webhook" },
+        "help": { "es": "La URL de un webhook entrante de Slack (https://hooks.slack.com/services/…).", "en": "The URL of a Slack incoming webhook (https://hooks.slack.com/services/…)." }
+      },
+      {
+        "name": "notifyOn",
+        "type": "tags",
+        "default": ["critical", "high"],
+        "label": { "es": "Severidades que avisan solas", "en": "Severities that post on their own" },
+        "help": { "es": "Separadas por coma: critical, high, medium, low, info. Vacío: ninguna.", "en": "Comma separated: critical, high, medium, low, info. Empty: none." }
+      }
+    ],
+    "operations": [
+      {
+        "name": "notify_finding",
+        "title": { "es": "Avisar en Slack", "en": "Post to Slack" },
+        "description": { "es": "Publica en el canal el título y la severidad de un hallazgo, con el proyecto.", "en": "Posts a finding's title and severity to the channel, with the project." },
+        "actors": ["human"],
+        "input": [{ "name": "findingId", "type": "string", "required": true, "label": { "es": "Hallazgo", "en": "Finding" } }],
+        "steps": [
+          { "do": "graph_get", "id": "f", "entity": "{{input.findingId}}" },
+          { "do": "fail", "if": "{{steps.f.kind | ne:'finding'}}", "message": "There is no finding {{input.findingId}} in this project" },
+          {
+            "do": "http",
+            "method": "POST",
+            "url": "https://hooks.slack.com/services/{{settings.webhook | replace:'https://hooks.slack.com/services/':''}}",
+            "body": { "text": ":rotating_light: *[{{steps.f.attributes.severity | upper}}] {{steps.f.attributes.title}}*\n{{engagement.clientName}} · {{engagement.name}}" },
+            "expect": [200],
+            "timeoutMs": 10000
+          }
+        ],
+        "result": { "title": "{{steps.f.attributes.title}}" },
+        "view": { "type": "message", "text": "✓ {{result.title}}" }
+      },
+      {
+        "name": "post",
+        "title": { "es": "Mensaje a Slack", "en": "Message to Slack" },
+        "description": { "es": "Publica un mensaje en el canal.", "en": "Posts a message to the channel." },
+        "actors": ["human"],
+        "input": [{ "name": "text", "type": "text", "required": true, "max": 3000, "label": { "es": "Mensaje", "en": "Message" } }],
+        "steps": [
+          {
+            "do": "http",
+            "method": "POST",
+            "url": "https://hooks.slack.com/services/{{settings.webhook | replace:'https://hooks.slack.com/services/':''}}",
+            "body": { "text": "{{input.text}}\n_{{engagement.clientName}} · {{engagement.name}}_" },
+            "expect": [200],
+            "timeoutMs": 10000
+          }
+        ],
+        "result": { "sent": true },
+        "view": { "type": "message", "text": "✓" }
+      }
+    ],
+    "menus": [
+      { "id": "notify", "title": { "es": "Avisar en Slack", "en": "Post to Slack" }, "operation": "notify_finding", "where": "entity", "kinds": ["finding"], "prefill": { "findingId": "{{entity.id}}" }, "direct": true },
+      { "id": "post", "title": { "es": "Mensaje a Slack", "en": "Message to Slack" }, "operation": "post", "where": "plugins" }
+    ],
+    "events": [
+      {
+        "on": "finding.created",
+        "operation": "notify_finding",
+        "when": "{{settings.notifyOn | contains:event.entity.attributes.severity}}",
+        "input": { "findingId": "{{event.entity.id}}" }
+      }
+    ]
+  }
+}

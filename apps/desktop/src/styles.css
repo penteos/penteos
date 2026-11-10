@@ -1,0 +1,17 @@
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "dockview-react/dist/styles/dockview.css";
+@import "@xterm/xterm/css/xterm.css";
+
+/* One file per area; the order matters (tokens first, overrides last). */
+@import "./styles/01-tokens.css";
+@import "./styles/02-shell.css";
+@import "./styles/03-panel-chrome.css";
+@import "./styles/04-dockview.css";
+@import "./styles/05-components.css";
+@import "./styles/06-menus-wizard.css";
+@import "./styles/07-panels.css";
+@import "./styles/08-team.css";
+@import "./styles/09-lenguaje.css";
+@import "./styles/10-plugins.css";
+@import "./styles/11-report.css";

@@ -1,0 +1,46 @@
+{
+  "name": "@penteos/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Penteos headless core: engagements, scope enforcement, ingest, tools, plugins and the operation catalog",
+  "license": "AGPL-3.0-or-later",
+  "homepage": "https://github.com/penteos/penteos",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/penteos/penteos.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/penteos/penteos/issues"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "penteos-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@penteos/parser-bloodhound": "workspace:*",
+    "@penteos/parser-nmap": "workspace:*",
+    "@penteos/schema": "workspace:*",
+    "@peculiar/x509": "2.1.0",
+    "ae-cvss-calculator": "1.0.13",
+    "docx": "9.8.1",
+    "fflate": "^0.8.3",
+    "ipaddr.js": "^2.5.0",
+    "reflect-metadata": "0.2.2",
+    "tldts": "^7.4.18",
+    "ws": "8.22.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "id": "penteos.jira",
+  "name": "Jira",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "engine": ">=0.1.0",
+  "level": "declarative",
+  "author": { "type": "human", "name": "Penteos" },
+  "description": {
+    "es": "Exporta un hallazgo como issue de Jira Cloud y deja anotado en el hallazgo cuál es. Envía el texto del hallazgo a Atlassian.",
+    "en": "Exports a finding as a Jira Cloud issue and notes on the finding which one it is. Sends the finding's text to Atlassian."
+  },
+  "permissions": ["net:*.atlassian.net", "graph:read", "graph:write", "ui:menu"],
+  "contributes": {
+    "settings": [
+      { "name": "site", "type": "string", "required": true, "max": 63, "label": { "es": "Sitio", "en": "Site" }, "placeholder": "acme", "help": { "es": "Si su Jira es acme.atlassian.net, escriba acme.", "en": "If your Jira is acme.atlassian.net, type acme." } },
+      { "name": "email", "type": "string", "required": true, "label": { "es": "Correo de la cuenta", "en": "Account e-mail" } },
+      { "name": "apiToken", "type": "string", "secret": true, "required": true, "label": { "es": "Token de API", "en": "API token" }, "help": { "es": "id.atlassian.com → Seguridad → Tokens de API.", "en": "id.atlassian.com → Security → API tokens." } },
+      { "name": "projectKey", "type": "string", "max": 20, "label": { "es": "Proyecto por defecto", "en": "Default project" }, "placeholder": "SEC" },
+      { "name": "issueType", "type": "string", "default": "Bug", "max": 40, "label": { "es": "Tipo de issue", "en": "Issue type" } }
+    ],
+    "annotations": [
+      {
+        "on": ["finding"],
+        "fields": [
+          { "name": "issueKey", "type": "string", "label": "Issue" },
+          { "name": "issueUrl", "type": "url", "label": "URL" }
+        ]
+      }
+    ],
+    "operations": [
+      {
+        "name": "export_finding",
+        "title": { "es": "Exportar a Jira", "en": "Export to Jira" },
+        "description": { "es": "Crea un issue en Jira con el título, la severidad, la descripción, el impacto y la remediación del hallazgo.", "en": "Creates a Jira issue with the finding's title, severity, description, impact and remediation." },
+        "actors": ["human"],
+        "input": [
+          { "name": "findingId", "type": "string", "required": true, "label": { "es": "Hallazgo", "en": "Finding" } },
+          { "name": "projectKey", "type": "string", "max": 20, "label": { "es": "Proyecto de Jira", "en": "Jira project" }, "help": { "es": "Vacío: el proyecto por defecto de los ajustes.", "en": "Empty: the default project from the settings." } },
+          { "name": "again", "type": "boolean", "default": false, "label": { "es": "Crear otro aunque ya se haya exportado", "en": "Create another one even if already exported" } }
+        ],
+        "steps": [
+          { "do": "graph_get", "id": "f", "entity": "{{input.findingId}}" },
+          { "do": "fail", "if": "{{steps.f | not}}", "message": "There is no finding {{input.findingId}} in this project" },
+          { "do": "fail", "if": "{{steps.f.kind | ne:'finding'}}", "message": "Only findings are exported to Jira" },
+          { "do": "fail", "if": "{{input.again | not | and:steps.f.mine.issueKey}}", "message": "Already exported as {{steps.f.mine.issueKey}} ({{steps.f.mine.issueUrl}})" },
+          { "do": "set", "vars": { "project": "{{input.projectKey | default:settings.projectKey}}", "en": "{{engagement.language | eq:'en'}}" } },
+          { "do": "fail", "if": "{{vars.project | empty}}", "message": "Say which Jira project (or set a default one in the plugin's settings)" },
+          {
+            "do": "http",
+            "id": "r",
+            "method": "POST",
+            "url": "https://{{settings.site}}.atlassian.net/rest/api/2/issue",
+            "headers": { "Authorization": "Basic {{settings.email | concat:':' | concat:settings.apiToken | base64}}" },
+            "body": {
+              "fields": {
+                "project": { "key": "{{vars.project}}" },
+                "summary": "[{{steps.f.attributes.severity | upper}}] {{steps.f.attributes.title}}",
+                "issuetype": { "name": "{{settings.issueType | default:'Bug'}}" },
+                "labels": ["penteos", "{{steps.f.attributes.severity}}"],
+                "description": "h3. {{vars.en | if:'Description':'Descripción'}}\n{{steps.f.attributes.description}}\n\nh3. {{vars.en | if:'Impact':'Impacto'}}\n{{steps.f.attributes.impact}}\n\nh3. {{vars.en | if:'Remediation':'Remediación'}}\n{{steps.f.attributes.remediation}}\n\n{{steps.f.attributes.references | join:'\n'}}"
+              }
+            },
+            "expect": [201],
+            "timeoutMs": 20000
+          },
+          {
+            "do": "annotate",
+            "entity": "{{steps.f.id}}",
+            "data": { "issueKey": "{{steps.r.body.key}}", "issueUrl": "https://{{settings.site}}.atlassian.net/browse/{{steps.r.body.key}}" }
+          }
+        ],
+        "result": { "issueKey": "{{steps.r.body.key}}", "issueUrl": "https://{{settings.site}}.atlassian.net/browse/{{steps.r.body.key}}" },
+        "view": { "type": "message", "text": "{{result.issueKey}} · {{result.issueUrl}}" }
+      }
+    ],
+    "menus": [
+      { "id": "export", "title": { "es": "Exportar a Jira", "en": "Export to Jira" }, "operation": "export_finding", "where": "entity", "kinds": ["finding"], "prefill": { "findingId": "{{entity.id}}" } }
+    ]
+  }
+}

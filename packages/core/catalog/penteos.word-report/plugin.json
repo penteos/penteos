@@ -1,0 +1,214 @@
+{
+  "id": "penteos.word-report",
+  "name": "Informe Word a medida",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "engine": ">=0.1.0",
+  "level": "declarative",
+  "author": {
+    "type": "human",
+    "name": "Penteos"
+  },
+  "description": {
+    "es": "El entregable oficial en Word, firmado y con la marca que usted elija para cada entrega: autor, empresa, color, título, qué secciones van, desde qué severidad y notas propias. Queda guardado en la carpeta del proyecto.",
+    "en": "The official deliverable in Word, signed and branded as you choose for each delivery: author, company, color, title, which sections go in, from which severity, and notes of your own. It is saved in the project's folder."
+  },
+  "permissions": [
+    "graph:read",
+    "files:write"
+  ],
+  "contributes": {
+    "operations": [
+      {
+        "name": "generate",
+        "title": {
+          "es": "Informe Word a medida",
+          "en": "Custom Word report"
+        },
+        "action": {
+          "es": "Generar informe",
+          "en": "Generate report"
+        },
+        "icon": "file-text",
+        "description": "Makes the official deliverable as a Word document with the author, company, color, title, sections and notes given (the project's real findings and evidence), saved among the plugin's files. Use it when the operator asks for a report signed by someone or with a particular look.",
+        "actors": [
+          "human",
+          "agent"
+        ],
+        "input": [
+          {
+            "name": "author",
+            "type": "string",
+            "required": true,
+            "max": 200,
+            "label": {
+              "es": "Autor",
+              "en": "Author"
+            },
+            "placeholder": {
+              "es": "Nombre y apellido",
+              "en": "Full name"
+            }
+          },
+          {
+            "name": "company",
+            "type": "string",
+            "max": 120,
+            "label": {
+              "es": "Empresa",
+              "en": "Company"
+            },
+            "help": {
+              "es": "Vacío: la de los ajustes de marca.",
+              "en": "Empty: the one in the branding settings."
+            }
+          },
+          {
+            "name": "title",
+            "type": "string",
+            "max": 200,
+            "label": {
+              "es": "Título",
+              "en": "Title"
+            },
+            "placeholder": {
+              "es": "Informe de seguridad - Cliente",
+              "en": "Security report - Client"
+            }
+          },
+          {
+            "name": "color",
+            "type": "enum",
+            "values": [
+              "#5b4bd6",
+              "#0f766e",
+              "#1d4ed8",
+              "#b91c1c",
+              "#c2410c",
+              "#334155"
+            ],
+            "default": "#0f766e",
+            "label": {
+              "es": "Color",
+              "en": "Color"
+            }
+          },
+          {
+            "name": "minSeverity",
+            "type": "enum",
+            "values": [
+              "info",
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "default": "info",
+            "label": {
+              "es": "Desde severidad",
+              "en": "From severity"
+            }
+          },
+          {
+            "name": "technical",
+            "type": "boolean",
+            "default": true,
+            "label": {
+              "es": "Incluir el detalle técnico",
+              "en": "Include the technical detail"
+            },
+            "help": {
+              "es": "Sin él: un informe ejecutivo (resumen, alcance y tabla de hallazgos).",
+              "en": "Without it: an executive report (summary, scope and findings table)."
+            }
+          },
+          {
+            "name": "drafts",
+            "type": "boolean",
+            "default": false,
+            "label": {
+              "es": "Incluir borradores",
+              "en": "Include drafts"
+            }
+          },
+          {
+            "name": "notes",
+            "type": "text",
+            "max": 20000,
+            "label": {
+              "es": "Notas del auditor",
+              "en": "Auditor's notes"
+            },
+            "help": {
+              "es": "Van como una sección propia, después del resumen ejecutivo. Admite markdown.",
+              "en": "They go as a section of their own, after the executive summary. Markdown works."
+            }
+          },
+          {
+            "name": "file",
+            "type": "string",
+            "max": 120,
+            "label": {
+              "es": "Nombre del archivo",
+              "en": "File name"
+            },
+            "placeholder": "informe-acme.docx"
+          }
+        ],
+        "steps": [
+          {
+            "do": "report",
+            "id": "doc",
+            "name": "{{input.file | default:'informe'}}",
+            "title": "{{input.title}}",
+            "author": "{{input.author}}",
+            "company": "{{input.company}}",
+            "color": "{{input.color}}",
+            "minSeverity": "{{input.minSeverity}}",
+            "includeDrafts": "{{input.drafts}}",
+            "extra": [
+              {
+                "title": "Notas del auditor",
+                "markdown": "{{input.notes}}",
+                "after": "executive_summary"
+              }
+            ],
+            "skip": "{{input.technical | if:'':'detailed,coverage,surface'}}"
+          }
+        ],
+        "result": "{{steps.doc}}",
+        "view": {
+          "type": "card",
+          "fields": [
+            {
+              "field": "name",
+              "label": {
+                "es": "Archivo",
+                "en": "File"
+              }
+            },
+            {
+              "field": "size",
+              "label": {
+                "es": "Tamaño (bytes)",
+                "en": "Size (bytes)"
+              }
+            }
+          ]
+        },
+        "timeoutMs": 60000
+      }
+    ],
+    "exports": [
+      {
+        "id": "word",
+        "title": {
+          "es": "Word a medida…",
+          "en": "Custom Word…"
+        },
+        "operation": "generate",
+        "icon": "file-text"
+      }
+    ]
+  }
+}

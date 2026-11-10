@@ -1,0 +1,6 @@
+{
+  "operation": "run",
+  "input": { "name": "x" },
+  "responses": [{ "url": "https://api.contract.test/thing", "body": { "ok": "yes" } }],
+  "expect": { "result": { "thing": "x:yes", "rows": 1, "settingsSeen": [] }, "steps": 5, "entities": 1 }
+}

@@ -1,0 +1,56 @@
+{
+  "id": "penteos.ai-providers",
+  "name": "Proveedores de IA",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "engine": ">=0.1.0",
+  "level": "declarative",
+  "author": { "type": "human", "name": "Penteos" },
+  "description": {
+    "es": "Suma DeepInfra, Groq, OpenRouter y Mistral como proveedores del Maestro (APIs compatibles con OpenAI). Son remotos: lo que lee el modelo sale siempre enmascarado. Use un modelo que soporte herramientas.",
+    "en": "Adds DeepInfra, Groq, OpenRouter and Mistral as providers for the Maestro (OpenAI-compatible APIs). They are remote: what the model reads is always masked. Use a model that supports tools."
+  },
+  "permissions": ["ai:provider", "net:api.deepinfra.com", "net:api.groq.com", "net:openrouter.ai", "net:api.mistral.ai"],
+  "contributes": {
+    "settings": [
+      { "name": "deepinfraKey", "type": "string", "secret": true, "label": { "es": "Clave de DeepInfra", "en": "DeepInfra key" }, "help": { "es": "deepinfra.com → Dashboard → API keys.", "en": "deepinfra.com → Dashboard → API keys." } },
+      { "name": "groqKey", "type": "string", "secret": true, "label": { "es": "Clave de Groq", "en": "Groq key" }, "help": { "es": "console.groq.com → API keys.", "en": "console.groq.com → API keys." } },
+      { "name": "openrouterKey", "type": "string", "secret": true, "label": { "es": "Clave de OpenRouter", "en": "OpenRouter key" }, "help": { "es": "openrouter.ai → Keys.", "en": "openrouter.ai → Keys." } },
+      { "name": "mistralKey", "type": "string", "secret": true, "label": { "es": "Clave de Mistral", "en": "Mistral key" }, "help": { "es": "console.mistral.ai → API keys.", "en": "console.mistral.ai → API keys." } }
+    ],
+    "providers": [
+      {
+        "id": "deepinfra",
+        "label": "DeepInfra",
+        "description": { "es": "Modelos abiertos por API (DeepSeek, Llama, Qwen)", "en": "Open models over an API (DeepSeek, Llama, Qwen)" },
+        "baseUrl": "https://api.deepinfra.com/v1/openai",
+        "models": ["deepseek-ai/DeepSeek-V3.1", "Qwen/Qwen3-235B-A22B-Instruct-2507", "meta-llama/Llama-3.3-70B-Instruct"],
+        "apiKey": "deepinfraKey"
+      },
+      {
+        "id": "groq",
+        "label": "Groq",
+        "description": { "es": "Modelos abiertos, muy rápidos", "en": "Open models, very fast" },
+        "baseUrl": "https://api.groq.com/openai/v1",
+        "models": ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"],
+        "apiKey": "groqKey"
+      },
+      {
+        "id": "openrouter",
+        "label": "OpenRouter",
+        "description": { "es": "Muchos modelos detrás de una sola clave", "en": "Many models behind one key" },
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "models": ["openrouter/auto"],
+        "apiKey": "openrouterKey"
+      },
+      {
+        "id": "mistral",
+        "label": "Mistral",
+        "description": { "es": "Modelos de Mistral AI", "en": "Mistral AI models" },
+        "baseUrl": "https://api.mistral.ai/v1",
+        "models": ["mistral-large-latest"],
+        "apiKey": "mistralKey"
+      }
+    ]
+  }
+}

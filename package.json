@@ -1,0 +1,44 @@
+{
+  "name": "penteos",
+  "private": true,
+  "description": "Penteos: an open-source, agentic workbench for penetration testing",
+  "license": "AGPL-3.0-or-later",
+  "homepage": "https://github.com/penteos/penteos",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/penteos/penteos.git"
+  },
+  "bugs": {
+    "url": "https://github.com/penteos/penteos/issues"
+  },
+  "type": "module",
+  "packageManager": "pnpm@10.14.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "dev": "pnpm --filter @penteos/desktop dev",
+    "ui:smoke": "node scripts/ui-smoke.mjs",
+    "i18n:check": "node scripts/check-i18n.mjs",
+    "electron:check": "node scripts/check-electron.mjs",
+    "test:contract": "pnpm --filter @penteos/core exec vitest run plugin-contract plugin-bundled plugin-builder",
+    "privacy:measure": "pnpm --filter @penteos/core exec vitest run privacy-measure"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "esbuild": "0.28.2",
+    "node-gyp": "^13.1.0",
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.7"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "node-pty",
+      "electron",
+      "esbuild"
+    ]
+  }
+}

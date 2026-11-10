@@ -1,0 +1,46 @@
+/* The deliverable: three steps and its versions */
+.report-steps { display: flex; gap: 2px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--bg-1); }
+.report-step { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--fg-2); font-size: 12.5px; cursor: pointer; }
+.report-step:hover { color: var(--fg-0); }
+.report-step.on { color: var(--fg-0); border-bottom-color: var(--accent); }
+.report-step-n { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--bg-2); color: var(--fg-1); font-size: 10.5px; font-weight: 600; }
+.report-step.on .report-step-n { background: var(--accent); color: #fff; }
+.report-step-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--warn); color: #1a1408; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
+
+.report-checks { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.report-check { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.report-check:last-child { border-bottom: 0; }
+.report-check-ic { color: var(--warn); display: grid; place-items: center; }
+.report-check.ok .report-check-ic { color: var(--ok); }
+.report-check.ok .report-check-text { color: var(--fg-2); }
+.report-check-text { color: var(--fg-0); overflow-wrap: anywhere; }
+.report-check-actions { display: flex; gap: 6px; }
+.report-ready { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--radius); color: var(--fg-0); font-size: 12.5px; }
+.report-ready .btn { margin-left: auto; }
+.report-qa { display: grid; grid-template-columns: 20px 1fr auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-1); }
+.report-qa svg { color: var(--accent); }
+.report-qa p { margin: 0; font-size: 12.5px; color: var(--fg-1); line-height: 1.5; }
+
+.report-doc { display: grid; grid-template-columns: 120px 220px 1fr; gap: 10px; }
+.report-doc label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--fg-2); }
+.report-field-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.report-field-h h2 { margin: 0 !important; }
+.report-field-hint { margin: 0 0 6px; font-size: 11.5px; }
+.report-save { display: flex; align-items: center; gap: 10px; position: sticky; bottom: 0; padding: 10px 0; background: var(--bg-0); font-size: 12px; }
+
+.report-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.report-kind { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--bg-1); color: var(--fg-1); cursor: pointer; font-size: 12px; line-height: 1.45; }
+.report-kind b { color: var(--fg-0); font-size: 13px; }
+.report-kind.on { border-color: var(--accent); background: var(--accent-soft); }
+.report-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.report-actions .grow { flex: 1; }
+.report-note { font-size: 11.5px; margin: 8px 0 12px; }
+
+.report-versions { display: flex; flex-direction: column; gap: 8px; }
+.report-version { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; background: var(--bg-1); }
+.report-version-h { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.report-version-h .grow { flex: 1; }
+.report-version-diff { margin-top: 6px; font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+.report-version-diff .add { color: var(--ok); }
+.report-version-diff .del { color: var(--bad); }
+.report-version-diff .chg { color: var(--fg-1); }

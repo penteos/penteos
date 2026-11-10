@@ -1,0 +1,58 @@
+{
+  "id": "penteos.passive-scan",
+  "name": "Escáner pasivo",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "engine": ">=0.1.0",
+  "level": "code",
+  "main": "main.mjs",
+  "author": { "type": "human", "name": "Penteos" },
+  "description": {
+    "es": "Mientras navega o el Maestro trabaja, revisa cada respuesta que pasa por el proxy sin demorarla: cabeceras de seguridad que faltan, claves y secretos expuestos, errores con detalle técnico, listados de directorio y cookies de sesión sin protección. Cada problema queda como hallazgo en borrador, una sola vez.",
+    "en": "While you browse or the Maestro works, it reviews every response that goes through the proxy without slowing it: missing security headers, exposed keys and secrets, errors with technical detail, directory listings and unprotected session cookies. Each problem becomes a draft finding, once."
+  },
+  "permissions": ["proxy", "findings:draft", "notify"],
+  "contributes": {
+    "settings": [
+      { "name": "headers", "type": "boolean", "default": true, "label": { "es": "Cabeceras de seguridad", "en": "Security headers" } },
+      { "name": "secrets", "type": "boolean", "default": true, "label": { "es": "Claves y secretos expuestos", "en": "Exposed keys and secrets" } },
+      { "name": "errors", "type": "boolean", "default": true, "label": { "es": "Errores con detalle técnico", "en": "Errors with technical detail" } },
+      { "name": "listing", "type": "boolean", "default": true, "label": { "es": "Listados de directorio", "en": "Directory listings" } },
+      { "name": "cookies", "type": "boolean", "default": true, "label": { "es": "Cookies de sesión sin protección", "en": "Unprotected session cookies" } }
+    ],
+    "storage": {
+      "project": [{ "version": 1, "steps": [{ "op": "create_table", "table": "seen", "columns": [{ "name": "key", "type": "text", "required": true }, { "name": "url", "type": "text" }, { "name": "finding", "type": "text" }] }, { "op": "create_index", "table": "seen", "name": "seen_key", "columns": ["key"], "unique": true }] }]
+    },
+    "proxy": [{ "id": "responses", "on": "response", "handler": "inspect" }],
+    "operations": [
+      {
+        "name": "summary",
+        "title": { "es": "Qué encontró el escáner pasivo", "en": "What the passive scanner found" },
+        "action": { "es": "Ver resumen", "en": "Show summary" },
+        "icon": "radar",
+        "description": "What the passive scanner flagged in this project so far (each problem once, as a draft finding), newest first.",
+        "handler": "summary",
+        "input": [],
+        "view": { "type": "table", "items": "items", "columns": [{ "field": "kind", "label": { "es": "Tipo", "en": "Kind" } }, { "field": "where", "label": { "es": "Dónde", "en": "Where" } }] }
+      },
+      {
+        "name": "forget",
+        "title": { "es": "Volver a avisar todo", "en": "Warn about everything again" },
+        "action": { "es": "Olvidar lo visto", "en": "Forget what was seen" },
+        "icon": "refresh",
+        "description": "Forgets what the passive scanner already flagged in this project, so it drafts findings again for what it sees next (the existing findings stay).",
+        "actors": ["human"],
+        "handler": "forget",
+        "input": [],
+        "view": { "type": "message", "text": "{{result.forgotten}}" }
+      }
+    ],
+    "skills": [
+      {
+        "id": "passive",
+        "title": { "es": "Escáner pasivo", "en": "Passive scanner" },
+        "text": "The passive scanner plugin reviews every response that goes through the proxy (yours and the operator's) and drafts findings on its own: missing security headers per host, exposed keys/secrets, verbose errors (stack traces, SQL errors), directory listings and session cookies without Secure/HttpOnly. Before drafting one of those yourself, check the drafts: it may already be there. Its drafts are leads: verify the serious ones (a key that works, an error you can trigger on purpose) before they are approved, and merge duplicates."
+      }
+    ]
+  }
+}

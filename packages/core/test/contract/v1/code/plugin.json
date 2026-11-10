@@ -1,0 +1,19 @@
+{
+  "id": "contract.code",
+  "name": "Contract v1 (code)",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "level": "code",
+  "main": "main.mjs",
+  "author": { "type": "human", "name": "Contract" },
+  "description": "Uses every code extension point.",
+  "permissions": ["net:api.contract.test", "graph:read", "graph:write", "ui:panel"],
+  "contributes": {
+    "settings": [{ "name": "key", "type": "string", "secret": true }],
+    "entityTypes": [{ "name": "thing", "label": "Thing", "fields": [{ "name": "name", "type": "string", "required": true }], "key": ["name"] }],
+    "storage": { "project": [{ "version": 1, "steps": [{ "op": "create_table", "table": "log", "columns": [{ "name": "text", "type": "text", "required": true }] }] }] },
+    "operations": [{ "name": "run", "title": "Run", "description": "Every API call once.", "handler": "run", "input": [{ "name": "name", "type": "string", "required": true }] }],
+    "parsers": [{ "id": "csv", "title": "Contract CSV", "detect": "contract-csv-v1", "extensions": [".csv"], "handler": "parse" }],
+    "panels": [{ "id": "main", "title": "Main", "file": "panel.html" }]
+  }
+}

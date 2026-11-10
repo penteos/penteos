@@ -1,0 +1,66 @@
+{
+  "id": "penteos.jwt",
+  "name": "Inspector de JWT",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "engine": ">=0.1.0",
+  "level": "code",
+  "main": "main.mjs",
+  "author": { "type": "human", "name": "Penteos" },
+  "description": {
+    "es": "Decodifica un JWT y revisa sus problemas típicos: alg none, secreto HMAC débil (prueba una lista y las palabras que usted agregue), vencimiento, kid, jku/x5u y claves embebidas. Todo local: el token no sale de esta máquina.",
+    "en": "Decodes a JWT and checks its usual problems: alg none, a weak HMAC secret (tries a list plus the words you add), expiry, kid, jku/x5u and embedded keys. All local: the token never leaves this machine."
+  },
+  "permissions": ["ui:panel"],
+  "contributes": {
+    "operations": [
+      {
+        "name": "inspect",
+        "title": { "es": "Inspeccionar JWT", "en": "Inspect JWT" },
+        "description": "Decodes a JWT (header and payload) and reports its weaknesses: alg none, a weak HMAC secret (cracked against a built-in list plus extra words), missing or long expiry, kid/jku/x5u/jwk headers worth testing. Local only. Use it on any token seen in traffic.",
+        "handler": "inspect",
+        "input": [
+          { "name": "token", "type": "text", "required": true, "max": 20000, "label": "JWT", "placeholder": "eyJhbGciOi…" },
+          { "name": "words", "type": "text", "max": 20000, "label": { "es": "Secretos extra a probar", "en": "Extra secrets to try" }, "help": { "es": "Uno por línea: nombre de la empresa, del producto, del dominio…", "en": "One per line: company, product, domain names…" } }
+        ],
+        "view": { "type": "table", "items": "issues", "columns": [{ "field": "severity", "label": { "es": "Severidad", "en": "Severity" } }, { "field": "title", "label": { "es": "Problema", "en": "Issue" } }, { "field": "detail", "label": { "es": "Detalle", "en": "Detail" } }] }
+      }
+    ],
+    "panels": [{ "id": "main", "title": { "es": "Inspector de JWT", "en": "JWT inspector" }, "file": "panel.html", "height": 560 }],
+    "findingTemplates": [
+      {
+        "id": "jwt-alg-none",
+        "title": "JWT aceptado sin firma (alg none)",
+        "severity": "critical",
+        "cwe": ["CWE-347"],
+        "description": "La aplicación acepta tokens JWT cuyo encabezado declara `alg: none`, es decir, sin firma. Cualquiera puede fabricar un token con los datos que quiera.",
+        "impact": "Un atacante puede suplantar a cualquier usuario o asignarse privilegios (por ejemplo `role: admin`) sin conocer ningún secreto.",
+        "remediation": "Rechazar siempre `alg: none` y fijar del lado del servidor el algoritmo esperado al verificar (no tomarlo del encabezado del token).",
+        "references": ["https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html", "https://portswigger.net/web-security/jwt"],
+        "tags": ["jwt", "authentication"]
+      },
+      {
+        "id": "jwt-weak-hmac-secret",
+        "title": "JWT firmado con un secreto HMAC débil",
+        "severity": "high",
+        "cwe": ["CWE-521", "CWE-798"],
+        "description": "El secreto con el que se firman los JWT (HS256/384/512) es adivinable: se lo obtuvo probando una lista de secretos comunes contra un token real.",
+        "impact": "Con el secreto, un atacante firma tokens válidos con cualquier identidad o rol: equivale a una contraseña maestra de la aplicación.",
+        "remediation": "Rotar el secreto por uno aleatorio de al menos 256 bits guardado fuera del código, invalidar los tokens emitidos y, si varios servicios verifican, considerar firmas asimétricas (RS256/ES256).",
+        "references": ["https://portswigger.net/web-security/jwt#brute-forcing-secret-keys"],
+        "tags": ["jwt", "authentication", "secrets"]
+      },
+      {
+        "id": "jwt-no-expiry",
+        "title": "JWT sin vencimiento o con vencimiento excesivo",
+        "severity": "medium",
+        "cwe": ["CWE-613"],
+        "description": "Los JWT emitidos no tienen `exp` o vencen después de un período excesivo, de modo que un token filtrado sigue siendo válido indefinidamente o por mucho tiempo.",
+        "impact": "Un token robado (registros, historial, XSS) permite usurpar la sesión mucho después de que el usuario dejó de usarla, sin forma simple de revocarlo.",
+        "remediation": "Emitir tokens de acceso de vida corta (minutos) con `exp`, renovarlos con un token de refresco revocable y validar `exp`, `nbf` e `iat` en el servidor.",
+        "references": ["https://datatracker.ietf.org/doc/html/rfc8725"],
+        "tags": ["jwt", "session"]
+      }
+    ]
+  }
+}

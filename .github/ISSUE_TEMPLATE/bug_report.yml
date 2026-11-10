@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in Penteos does not work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Penteos version
+      placeholder: "0.1.0 (Help → About)"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Distribution and version, and how Penteos was installed (AppImage, .deb, .rpm, tar.gz, from source).
+      placeholder: "Ubuntu 24.04, .deb"
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        The relevant part of `~/.local/share/penteos/logs/core.log`.
+        **Remove any client data, target names, tokens or keys before pasting.**
+      render: text

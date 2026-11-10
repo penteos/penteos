@@ -1,0 +1,32 @@
+{
+  "name": "@penteos/plugin-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The contract of Penteos plugins: the manifest, its checks, the template language and the API code plugins get",
+  "license": "AGPL-3.0-or-later",
+  "homepage": "https://github.com/penteos/penteos",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/penteos/penteos.git",
+    "directory": "packages/plugin-sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/penteos/penteos/issues"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "penteos-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@penteos/schema": "workspace:*"
+  }
+}

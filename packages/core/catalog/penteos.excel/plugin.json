@@ -1,0 +1,33 @@
+{
+  "id": "penteos.excel",
+  "name": "Hallazgos a Excel",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "engine": ">=0.1.0",
+  "level": "code",
+  "runtime": "python",
+  "main": "main.py",
+  "author": { "type": "human", "name": "Penteos" },
+  "description": {
+    "es": "Los hallazgos del entregable en una planilla de Excel lista para el cliente o para seguir la remediación: severidad con su color, activos afectados, descripción y recomendación, con filtros y la primera fila fija. Hecho en Python, sin librerías externas.",
+    "en": "The deliverable's findings in an Excel sheet ready for the client or to track remediation: severity with its color, affected assets, description and remediation, with filters and the first row frozen. Made in Python, with no external libraries."
+  },
+  "permissions": ["graph:read", "files:write"],
+  "contributes": {
+    "operations": [
+      {
+        "name": "excel",
+        "title": { "es": "Hallazgos a Excel", "en": "Findings to Excel" },
+        "action": { "es": "Generar Excel", "en": "Make Excel" },
+        "icon": "chart",
+        "description": "Writes the deliverable's findings (approved and later states) as an Excel sheet among the plugin's files: severity colored, affected assets, description, remediation, with filters.",
+        "actors": ["human", "agent"],
+        "handler": "excel",
+        "input": [],
+        "view": { "type": "card", "fields": [{ "field": "name", "label": { "es": "Archivo", "en": "File" } }, { "field": "findings", "label": { "es": "Hallazgos", "en": "Findings" } }] },
+        "timeoutMs": 60000
+      }
+    ],
+    "exports": [{ "id": "xlsx", "title": "Excel (.xlsx)", "operation": "excel", "icon": "chart" }]
+  }
+}

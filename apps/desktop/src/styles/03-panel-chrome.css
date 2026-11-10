@@ -1,0 +1,24 @@
+/* Panel chrome shared by bottom panel and agent sidebar                                      */
+/* ------------------------------------------------------------------------------------------ */
+
+.bottom { display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); border-top: 1px solid var(--line); }
+.strip {
+  display: flex; align-items: center; height: 34px; padding: 0 6px 0 4px; flex-shrink: 0;
+  background: var(--bg-0); border-bottom: 1px solid var(--line);
+}
+.strip .tabs { display: flex; height: 100%; }
+.strip .tab-btn {
+  display: flex; align-items: center; gap: 6px; height: 100%; padding: 0 12px; border: 0; background: transparent;
+  color: var(--fg-3); cursor: pointer; font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; font-weight: 560;
+  position: relative;
+}
+.strip .tab-btn:hover { color: var(--fg-1); }
+.strip .tab-btn.on { color: var(--fg-0); }
+.strip .tab-btn.on::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 1px; background: var(--fg-0); }
+.strip .grow { flex: 1; }
+.bottom-body { flex: 1; min-height: 0; position: relative; }
+.bottom-body > .pane { position: absolute; inset: 0; display: flex; flex-direction: column; }
+
+.agentbar { display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); border-left: 1px solid var(--line); flex-shrink: 0; }
+
+/* ------------------------------------------------------------------------------------------ */

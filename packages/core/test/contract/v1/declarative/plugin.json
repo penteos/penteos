@@ -1,0 +1,237 @@
+{
+  "id": "contract.declarative",
+  "name": "Contract v1 (declarative)",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "level": "declarative",
+  "author": {
+    "type": "human",
+    "name": "Contract"
+  },
+  "description": {
+    "es": "Usa cada punto de extensión declarativo.",
+    "en": "Uses every declarative extension point."
+  },
+  "permissions": [
+    "net:api.contract.test",
+    "graph:read",
+    "graph:write",
+    "findings:draft",
+    "notify",
+    "ui:menu",
+    "ai:provider",
+    "secrets:contract_token"
+  ],
+  "contributes": {
+    "settings": [
+      {
+        "name": "key",
+        "type": "string",
+        "secret": true
+      },
+      {
+        "name": "limit",
+        "type": "integer",
+        "default": 2
+      }
+    ],
+    "entityTypes": [
+      {
+        "name": "item",
+        "label": "Item",
+        "fields": [
+          {
+            "name": "name",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "host",
+            "type": "host"
+          }
+        ],
+        "key": [
+          "name"
+        ],
+        "target": "host"
+      }
+    ],
+    "annotations": [
+      {
+        "on": [
+          "host"
+        ],
+        "fields": [
+          {
+            "name": "seen",
+            "type": "boolean"
+          }
+        ]
+      }
+    ],
+    "storage": {
+      "project": [
+        {
+          "version": 1,
+          "steps": [
+            {
+              "op": "create_table",
+              "table": "runs",
+              "columns": [
+                {
+                  "name": "n",
+                  "type": "integer",
+                  "required": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "findingTemplates": [
+      {
+        "id": "contract-template",
+        "title": "Contract template",
+        "severity": "low"
+      }
+    ],
+    "providers": [
+      {
+        "id": "llm",
+        "label": "Contract LLM",
+        "baseUrl": "https://api.contract.test/v1",
+        "models": [
+          "m"
+        ],
+        "apiKey": "key"
+      }
+    ],
+    "operations": [
+      {
+        "name": "everything",
+        "title": "Everything",
+        "description": "Every step type once.",
+        "input": [
+          {
+            "name": "ip",
+            "type": "host",
+            "required": true
+          }
+        ],
+        "steps": [
+          {
+            "do": "http",
+            "id": "r",
+            "method": "POST",
+            "url": "https://api.contract.test/items",
+            "headers": {
+              "Authorization": "Bearer {{settings.key}}"
+            },
+            "body": {
+              "ip": "{{input.ip}}"
+            }
+          },
+          {
+            "do": "set",
+            "vars": {
+              "names": "{{steps.r.body.items | pluck:'name' | take:settings.limit}}"
+            }
+          },
+          {
+            "do": "each",
+            "id": "put",
+            "over": "{{vars.names}}",
+            "as": "n",
+            "steps": [
+              {
+                "do": "put",
+                "type": "item",
+                "attributes": {
+                  "name": "{{n}}",
+                  "host": "{{input.ip}}"
+                },
+                "id": "p"
+              }
+            ],
+            "collect": "{{steps.p.id}}"
+          },
+          {
+            "do": "graph_query",
+            "id": "hosts",
+            "kind": "host",
+            "text": "{{input.ip}}"
+          },
+          {
+            "do": "annotate",
+            "if": "{{steps.hosts | length}}",
+            "entity": "{{steps.hosts[0].id}}",
+            "data": {
+              "seen": true
+            }
+          },
+          {
+            "do": "relate",
+            "if": "{{steps.hosts | length}}",
+            "from": "{{steps.put[0]}}",
+            "to": "{{steps.hosts[0].id}}"
+          },
+          {
+            "do": "store_insert",
+            "table": "runs",
+            "row": {
+              "n": "{{steps.put | length}}"
+            }
+          },
+          {
+            "do": "store_query",
+            "id": "runs",
+            "table": "runs"
+          },
+          {
+            "do": "finding_draft",
+            "title": "Contract finding {{input.ip}}",
+            "severity": "low"
+          },
+          {
+            "do": "notify",
+            "title": "done"
+          },
+          {
+            "do": "fail",
+            "if": "{{steps.runs | empty}}",
+            "message": "no runs stored"
+          }
+        ],
+        "result": {
+          "saved": "{{steps.put}}",
+          "runs": "{{steps.runs | length}}"
+        }
+      }
+    ],
+    "menus": [
+      {
+        "id": "go",
+        "title": "Go",
+        "operation": "everything",
+        "where": "entity",
+        "kinds": [
+          "host"
+        ],
+        "prefill": {
+          "ip": "{{entity.attributes.ip}}"
+        }
+      }
+    ],
+    "events": [
+      {
+        "on": "host.created",
+        "operation": "everything",
+        "when": "{{event.entity.attributes.ip | eq:'0.0.0.0'}}",
+        "input": {
+          "ip": "{{event.entity.attributes.ip}}"
+        }
+      }
+    ]
+  }
+}

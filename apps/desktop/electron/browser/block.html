@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src 'self'">
+<style>
+  @font-face { font-family: "Geist"; src: url("fonts/geist.woff2") format("woff2"); font-weight: 100 900; }
+  @font-face { font-family: "Geist Mono"; src: url("fonts/geist-mono.woff2") format("woff2"); font-weight: 100 900; }
+  :root { color-scheme: dark; --fg0: #f4f2f8; --fg1: #c9c5d3; --fg2: #8d8799; --fg3: #5f596b; --amber: #e3a857; --bad: #e0675f; --tone: var(--amber); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #0c0a10; overflow: hidden; height: 100%; }
+  body { font: 13px "Geist", system-ui, sans-serif; color: var(--fg1); -webkit-user-select: none; }
+  body.bad { --tone: var(--bad); }
+
+  /* One band across the browser: a stripe of the block's tone, why, and the way out. */
+  .band { position: relative; height: 100%; display: flex; align-items: center; gap: 14px; padding: 0 12px 0 0; background: #110d12; }
+  .band::before { content: ""; align-self: stretch; width: 3px; background: var(--tone); flex-shrink: 0; }
+  .band::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: color-mix(in srgb, var(--tone) 45%, transparent); }
+  .mark { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: var(--tone); stroke-width: 1.7; stroke-linecap: square; stroke-linejoin: miter; }
+  .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .title { color: var(--fg0); font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .title code { font: 500 12.5px "Geist Mono", monospace; color: var(--tone); }
+  .why { color: var(--fg2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .why.err { color: var(--bad); }
+  .actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  button { height: 28px; padding: 0 12px; border-radius: 2px; font: 500 12px "Geist", system-ui, sans-serif; cursor: pointer; white-space: nowrap; }
+  button[hidden] { display: none; }
+  button:disabled { opacity: .5; cursor: default; }
+  .primary { background: #f4f2f8; border: 1px solid #f4f2f8; color: #110e16; font-weight: 600; }
+  .primary:hover:not(:disabled) { background: #fff; }
+  .quiet { background: transparent; border: 1px solid rgba(255, 255, 255, .14); color: var(--fg1); }
+  .quiet:hover:not(:disabled) { border-color: rgba(255, 255, 255, .32); color: var(--fg0); }
+  .close { width: 28px; padding: 0; border: 0; background: transparent; color: var(--fg3); font-size: 16px; line-height: 1; }
+  .close:hover { color: var(--fg0); }
+</style>
+</head>
+<body>
+  <div class="band">
+    <svg class="mark" viewBox="0 0 16 16"><path d="M8 1.5 14.5 13.5h-13z"/><path d="M8 6v3.5M8 11.2v.6"/></svg>
+    <div class="text">
+      <div class="title" id="title"></div>
+      <div class="why" id="why"></div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="main" hidden></button>
+      <button class="quiet" id="second" hidden></button>
+      <button class="close" id="close">×</button>
+    </div>
+  </div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const fill = (s, vars) => String(s || "").replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
+  let current;
+
+  // What each block offers. The operator is the authority: they can add scope or lift the pause here.
+  function render(b) {
+    current = b;
+    const L = b.labels || {};
+    const host = b.host || "";
+    const vars = { host, detail: b.detail || "" };
+    document.body.classList.toggle("bad", b.kind === "stop_work");
+    const plan = {
+      out_of_scope: { title: L.outTitle, why: L.outWhy, main: ["add_scope", L.add], second: ["let_through", L.letThrough] },
+      stop_work: { title: L.stopTitle, why: b.detail ? L.stopWhyReason : L.stopWhy, main: ["resume", L.resume] },
+      outside_window: { title: L.windowTitle, why: L.windowWhy, second: ["open_scope", L.openScope] },
+      other: { title: L.otherTitle, why: L.otherWhy, second: ["open_scope", L.openScope] },
+    }[b.kind] || {};
+    const title = $("title");
+    title.textContent = "";
+    // The host in mono, inside the sentence ({host} marks where).
+    const parts = String(plan.title || "").split("{host}");
+    parts.forEach((p, i) => {
+      title.append(p);
+      if (i < parts.length - 1) {
+        const c = document.createElement("code");
+        c.textContent = host;
+        title.append(c);
+      }
+    });
+    title.title = fill(plan.title, vars);
+    $("why").textContent = fill(plan.why, vars);
+    $("why").title = $("why").textContent;
+    $("why").classList.remove("err");
+    for (const [id, spec] of [["main", plan.main], ["second", plan.second]]) {
+      const el = $(id);
+      el.hidden = !spec;
+      el.disabled = false;
+      if (spec) {
+        el.textContent = fill(spec[1], vars);
+        el.dataset.action = spec[0];
+      }
+    }
+    $("close").title = L.dismiss || "";
+  }
+
+  for (const id of ["main", "second"]) {
+    $(id).addEventListener("click", (e) => {
+      const action = e.currentTarget.dataset.action;
+      if (!action) return;
+      if (action !== "open_scope") {
+        $("main").disabled = true;
+        $("second").disabled = true;
+        $("why").textContent = (current.labels || {}).working || "";
+      }
+      window.block.action(action);
+    });
+  }
+  $("close").addEventListener("click", () => window.block.action("dismiss"));
+  window.block.onShow(render);
+  window.block.onError((text) => {
+    $("main").disabled = false;
+    $("second").disabled = false;
+    $("why").textContent = text;
+    $("why").classList.add("err");
+  });
+</script>
+</body>
+</html>

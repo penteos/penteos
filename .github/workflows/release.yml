@@ -1,0 +1,88 @@
+name: release
+
+# A tag (v0.1.0, or v0.1.0-rc.1 for a pre-release) builds every Linux package in the release image,
+# installs them on clean distributions (x86_64 and arm64), and publishes the release only if all
+# of that passed. Anyone can read here how each downloaded file was made.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release image (old glibc, so the packages run on old distributions)
+        run: docker build -t penteos-release scripts/release
+      - name: Packages for x86_64 and arm64
+        run: |
+          mkdir -p out
+          docker run --rm -v "$PWD":/src -v "$PWD/out":/out penteos-release sh scripts/release/build.sh x64,arm64
+      - name: The tag matches the app's version
+        run: test "v$(cat out/VERSION)" = "${GITHUB_REF_NAME%%-*}" || test "v$(cat out/VERSION)" = "$GITHUB_REF_NAME"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: out/
+          if-no-files-found: error
+
+  install:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, image: "ubuntu:22.04", family: deb }
+          - { runner: ubuntu-latest, image: "ubuntu:24.04", family: deb }
+          - { runner: ubuntu-latest, image: "debian:12", family: deb }
+          - { runner: ubuntu-latest, image: "kalilinux/kali-rolling", family: deb }
+          - { runner: ubuntu-latest, image: "fedora:41", family: dnf }
+          - { runner: ubuntu-latest, image: "rockylinux:9", family: dnf }
+          - { runner: ubuntu-latest, image: "opensuse/leap:15.6", family: zypper }
+          - { runner: ubuntu-latest, image: "archlinux:latest", family: appimage }
+          - { runner: ubuntu-24.04-arm, image: "ubuntu:24.04", family: deb }
+          - { runner: ubuntu-24.04-arm, image: "debian:12", family: deb }
+          - { runner: ubuntu-24.04-arm, image: "fedora:41", family: dnf }
+    name: install on ${{ matrix.image }} (${{ matrix.runner == 'ubuntu-24.04-arm' && 'arm64' || 'x86_64' }})
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: pkg
+      - name: Install as a user would, run the core end to end, open the app on a virtual screen
+        run: |
+          cp scripts/release/check-install.sh scripts/release/e2e-core.mjs pkg/
+          docker run --rm -v "$PWD/pkg":/pkg:ro "${{ matrix.image }}" sh /pkg/check-install.sh "${{ matrix.family }}"
+
+  publish:
+    needs: install
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: out
+      - name: Checksums still match what was tested
+        run: cd out && sha256sum -c SHA256SUMS
+      - name: Release notes from the changelog
+        run: |
+          version="$(cat out/VERSION)"
+          awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on' CHANGELOG.md > notes.md
+          test -s notes.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" out/penteos-* out/SHA256SUMS out/install.sh \
+            --title "Penteos ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag $pre

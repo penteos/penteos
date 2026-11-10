@@ -1,0 +1,38 @@
+{
+  "name": "@penteos/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Penteos core process: operations over HTTP/WebSocket, AI agents, terminals and the MCP bridge",
+  "license": "AGPL-3.0-or-later",
+  "homepage": "https://github.com/penteos/penteos",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/penteos/penteos.git",
+    "directory": "packages/server"
+  },
+  "bugs": {
+    "url": "https://github.com/penteos/penteos/issues"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "dev": "node --conditions=penteos-source --import tsx src/main.ts",
+    "mcp": "node --conditions=penteos-source --import tsx src/mcp.ts"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@penteos/core": "workspace:*",
+    "@penteos/schema": "workspace:*",
+    "node-pty": "^1.1.0",
+    "openai": "^7.32.0",
+    "ws": "8.22.0",
+    "zod": "^4.6.7"
+  }
+}

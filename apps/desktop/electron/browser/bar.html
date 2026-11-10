@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src 'self'">
+<style>
+  @font-face { font-family: "Geist"; src: url("fonts/geist.woff2") format("woff2"); font-weight: 100 900; }
+  @font-face { font-family: "Geist Mono"; src: url("fonts/geist-mono.woff2") format("woff2"); font-weight: 100 900; }
+  :root { color-scheme: dark; --fg0: #f4f2f8; --fg1: #c9c5d3; --fg2: #8d8799; --fg3: #5f596b; --violet: #9d8cff; --amber: #e3a857; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 44px; overflow: hidden; }
+  body {
+    position: relative; display: flex; align-items: center; gap: 4px; padding: 0 10px 0 8px;
+    background: #0c0a10; font: 13px "Geist", system-ui, sans-serif; color: var(--fg1); -webkit-user-select: none;
+  }
+  /* The horizon under the bar: violet into amber, fading at both ends (as under the app's top bar). */
+  body::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--violet) 35%, var(--amber) 65%, transparent); opacity: .8; }
+  button { width: 28px; height: 28px; border: 0; border-radius: 2px; background: transparent; color: var(--fg1); cursor: pointer; display: grid; place-items: center; flex-shrink: 0; }
+  button:hover:not(:disabled) { background: rgba(255, 255, 255, .06); color: var(--fg0); }
+  button:disabled { color: #3e3848; cursor: default; }
+  svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: square; stroke-linejoin: miter; }
+  .addr {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 30px; margin: 0 6px; padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, .09); border-radius: 2px; background: rgba(255, 255, 255, .025);
+  }
+  .addr:focus-within { border-color: rgba(157, 140, 255, .65); background: rgba(157, 140, 255, .05); }
+  .addr input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--fg0); font: 12.5px "Geist Mono", ui-monospace, monospace; letter-spacing: -.01em; }
+  .addr input::placeholder { color: var(--fg3); }
+  .lock { color: #6cc69a; display: grid; }
+  .lock svg { width: 14px; height: 14px; }
+  .lock.insecure { color: var(--fg2); }
+  .err { color: #e5717d; font-size: 11.5px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The proxy, as an instrument: a label, the project, a live line, and what was recorded. */
+  .proxy { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-left: 1px solid rgba(255, 255, 255, .07); margin-left: 4px; white-space: nowrap; }
+  .proxy .k { font: 10.5px "Geist Mono", monospace; letter-spacing: .08em; color: var(--fg3); text-transform: uppercase; }
+  .proxy .p { color: var(--fg1); font-size: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+  .proxy .line { width: 18px; height: 2px; background: var(--violet); box-shadow: 0 0 8px rgba(157, 140, 255, .8); }
+  .loading .proxy .line { opacity: .45; }
+  .proxy .n { font: 12px "Geist Mono", monospace; color: var(--fg0); }
+  .proxy .n:empty { display: none; }
+  .maestro { display: none; width: auto; padding: 0 10px; gap: 6px; font-size: 12px; color: var(--fg0); border: 1px solid transparent; background: linear-gradient(#0c0a10, #0c0a10) padding-box, linear-gradient(100deg, var(--violet) 0 38%, var(--amber) 62%) border-box; }
+  .maestro.on { display: inline-flex; align-items: center; }
+  .maestro svg { width: 14px; height: 14px; stroke: var(--violet); }
+</style>
+</head>
+<body>
+  <button id="back"><svg viewBox="0 0 24 24"><path d="M14 6l-6 6 6 6"/></svg></button>
+  <button id="forward"><svg viewBox="0 0 24 24"><path d="M10 6l6 6-6 6"/></svg></button>
+  <button id="reload"><svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3 M19.5 4.5v4.5H15"/></svg></button>
+  <div class="addr">
+    <span class="lock" id="lock"><svg viewBox="0 0 24 24"><path d="M6 11h12v9H6z M8.5 11V7.5L10 6h4l1.5 1.5V11"/></svg></span>
+    <input id="url" spellcheck="false">
+  </div>
+  <span class="err" id="err"></span>
+  <button class="maestro" id="maestro"><svg viewBox="0 0 24 24"><path d="M4 18l2-10 4 4 2-6 2 6 4-4 2 10z M4 21h16"/></svg><span id="maestroLabel"></span></button>
+  <div class="proxy" id="proxy">
+    <span class="k" id="proxyK">Proxy</span>
+    <span class="line"></span>
+    <span class="p" id="project"></span>
+    <span class="n" id="count"></span>
+  </div>
+  <button id="devtools"><svg viewBox="0 0 24 24"><path d="M15 7l5 5-5 5 M9 7l-5 5 5 5"/></svg></button>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let editing = false;
+  $("url").addEventListener("focus", () => { editing = true; $("url").select(); });
+  $("url").addEventListener("blur", () => { editing = false; });
+  $("url").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { window.bar.navigate($("url").value); $("url").blur(); }
+    if (e.key === "Escape") $("url").blur();
+  });
+  $("back").onclick = () => window.bar.back();
+  $("forward").onclick = () => window.bar.forward();
+  $("reload").onclick = () => window.bar.reload();
+  $("devtools").onclick = () => window.bar.devtools();
+  $("maestro").onclick = () => window.bar.showNote();
+  window.bar.onFocus(() => $("url").focus());
+  window.bar.onState((s) => {
+    const l = s.labels || {};
+    $("back").title = l.back || "";
+    $("forward").title = l.forward || "";
+    $("reload").title = l.reload || "";
+    $("devtools").title = l.devtools || "";
+    $("url").placeholder = l.placeholder || "";
+    $("proxy").title = l.proxyHint || "";
+    $("proxyK").textContent = l.proxy || "Proxy";
+    $("maestroLabel").textContent = l.maestro || "Maestro";
+    if (!editing && s.url) $("url").value = s.url;
+    $("back").disabled = !s.canGoBack;
+    $("forward").disabled = !s.canGoForward;
+    $("lock").classList.toggle("insecure", !String(s.url || "").startsWith("https:"));
+    $("project").textContent = s.project || "Penteos";
+    document.body.classList.toggle("loading", Boolean(s.loading));
+    $("err").textContent = s.error || "";
+    $("count").textContent = typeof s.exchanges === "number" ? String(s.exchanges).padStart(3, "0") : "";
+    $("maestro").classList.toggle("on", Boolean(s.noteHidden));
+    document.title = s.title || "";
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+/* Shell: title bar / [activity | center (editor + bottom panel) | agent] / status bar          */
+/* ------------------------------------------------------------------------------------------ */
+
+.shell { display: grid; grid-template-rows: 38px 1fr 24px; height: 100%; }
+.workarea { display: flex; min-height: 0; }
+.center { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.editor { flex: 1; min-height: 0; }
+
+.sash-v { width: 4px; margin: 0 -2px; cursor: col-resize; z-index: 5; flex-shrink: 0; position: relative; }
+.sash-h { height: 4px; margin: -2px 0; cursor: row-resize; z-index: 5; flex-shrink: 0; position: relative; }
+.sash-v:hover, .sash-v.dragging, .sash-h:hover, .sash-h.dragging { background: var(--accent-line); }
+
+.topbar {
+  display: flex; align-items: center; gap: 10px; padding: 0 8px 0 10px;
+  background: var(--bg-0); border-bottom: 1px solid var(--line);
+}
+.brand-mark {
+  width: 22px; height: 22px; border-radius: 5px; display: grid; place-items: center;
+  background: var(--accent-strong); color: #fff;
+}
+.topbar-spacer { flex: 1; }
+.switcher {
+  display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border-radius: var(--radius);
+  border: 0; background: transparent; color: var(--fg-1); cursor: pointer;
+}
+.switcher:hover { background: var(--bg-3); }
+.switcher b { color: var(--fg-0); font-weight: 560; }
+.switcher .sep { color: var(--fg-3); }
+.mode { font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; color: var(--fg-2); border: 1px solid var(--line-2); padding: 0 5px; border-radius: 3px; }
+
+.search-trigger {
+  display: flex; align-items: center; gap: 8px; width: 420px; min-width: 220px; flex-shrink: 1; height: 26px; padding: 0 8px;
+  border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--bg-1); color: var(--fg-3); cursor: pointer;
+}
+.search-trigger:hover { border-color: #3b3448; color: var(--fg-2); }
+.search-trigger .label { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kbd { font-family: var(--font-mono); font-size: 10.5px; padding: 0 4px; border-radius: 3px; border: 1px solid var(--line-2); color: var(--fg-3); }
+
+.icon-btn {
+  width: 28px; height: 26px; display: grid; place-items: center; border-radius: var(--radius); border: 0;
+  background: transparent; color: var(--fg-2); cursor: pointer;
+}
+.icon-btn:hover { background: var(--bg-3); color: var(--fg-0); }
+.icon-btn.on { color: var(--fg-0); background: var(--bg-3); }
+
+.stop-btn {
+  display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--radius); cursor: pointer;
+  border: 1px solid var(--line-2); background: transparent; color: var(--fg-1);
+}
+.stop-btn:hover { border-color: var(--bad); color: var(--bad); }
+.stop-btn.active { background: var(--bad-strong); border-color: var(--bad-strong); color: #fff; }
+
+.activitybar {
+  width: 48px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; padding: 4px 0;
+  background: var(--bg-0); border-right: 1px solid var(--line);
+}
+.activitybar .grow { flex: 1; }
+.ab-btn {
+  position: relative; width: 48px; height: 44px; display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--fg-3); cursor: pointer;
+}
+.ab-btn:hover { color: var(--fg-0); }
+.ab-btn.active { color: var(--fg-0); }
+.ab-btn.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--accent); }
+.ab-btn .count {
+  position: absolute; top: 6px; right: 8px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px;
+  background: var(--accent-strong); color: #fff; font-size: 9.5px; font-weight: 650; display: grid; place-items: center;
+}
+/* A quiet "there is something new here" dot (cleared when the section is opened). */
+.ab-btn .ab-new { position: absolute; top: 9px; right: 11px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); opacity: .5; }
+.ab-btn:hover .ab-new { opacity: .75; }
+.ab-btn[data-tip]:hover::after {
+  content: attr(data-tip); position: absolute; left: 50px; white-space: nowrap; z-index: 100;
+  background: var(--bg-3); color: var(--fg-0); padding: 4px 8px; border-radius: var(--radius); font-size: 12px;
+  border: 1px solid var(--line-2); pointer-events: none;
+}
+
+.statusbar {
+  display: flex; align-items: center; gap: 2px; padding: 0 6px; font-size: 11.5px; color: var(--fg-2);
+  background: var(--bg-0); border-top: 1px solid var(--line);
+}
+.statusbar .item { display: flex; align-items: center; gap: 5px; height: 100%; padding: 0 6px; }
+.statusbar .grow { flex: 1; }
+.statusbar .clickable { cursor: pointer; }
+.statusbar .clickable:hover { background: var(--bg-3); color: var(--fg-0); }
+.statusbar .alert { color: var(--accent); }
+.led { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); }
+.led.ok { background: var(--ok); }
+.led.bad { background: var(--bad); }
+.led.warn { background: var(--warn); }
+.led.accent { background: var(--accent); }
+
+.stop-banner {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px; color: #fff; background: var(--bad-strong); font-weight: 560;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+
+/* Nothing in the top bar wraps: the search field gives way first, then the project name truncates. */
+.topbar > * { flex-shrink: 0; }
+.topbar .search-trigger { width: auto; flex: 1 1 160px; max-width: 420px; min-width: 120px; }
+.topbar .switcher { white-space: nowrap; max-width: 320px; overflow: hidden; }
+.topbar .switcher b, .topbar .switcher span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .mode { white-space: nowrap; flex-shrink: 0; }
+.topbar .controls button { white-space: nowrap; }
+
+/* Attention in the activity bar: the icon lights up, the badge counts what waits for the operator, urgent pulses. */
+.ab-btn.needs { color: var(--fg-1); }
+.ab-btn .count.urgent { background: var(--warn); color: #1a1400; animation: ab-pulse 1.6s ease-in-out infinite; }
+@keyframes ab-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(214, 178, 110, 0.55); }
+  50% { box-shadow: 0 0 0 5px rgba(214, 178, 110, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .ab-btn .count.urgent { animation: none; } }

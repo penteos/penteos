@@ -1,0 +1,32 @@
+#!/bin/sh
+# Demo stand-in for curl (screenshots only): canned answers for the fictional acme-corp.test. No network.
+for a in "$@"; do [ "$a" = "--version" ] && { echo "curl 8.5.0 (x86_64-pc-linux-gnu) libcurl/8.5.0"; exit 0; }; done
+case "$*" in
+  *staging.acme-corp.test:8080/scriptText*)
+    cat <<'OUT'
+HTTP/1.1 200 OK
+Server: Jetty(9.4.43.v20210629)
+X-Jenkins: 2.303.1
+Content-Type: text/plain;charset=utf-8
+
+uid=1000(jenkins) gid=1000(jenkins) groups=1000(jenkins)
+jobs: 14
+credentials (ids only): 31
+  aws-deploy-prod        AWS access key (role: acme-deploy)
+  prod-web-ssh           SSH private key (user: deploy)
+  github-ci-token        Secret text
+  ... 28 more
+OUT
+    ;;
+  *api.acme-corp.test/api/v2/orders*)
+    cat <<'OUT'
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"probe":"boolean-blind COUNT","orders":48210,"distinct_customers":6912,"columns":["id","customer_name","shipping_address","phone","total","card_token"]}
+OUT
+    ;;
+  *)
+    printf 'HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><title>Acme</title></html>\n'
+    ;;
+esac

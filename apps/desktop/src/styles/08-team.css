@@ -1,0 +1,58 @@
+.panic-btn { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 2px 8px; border-radius: 3px; border: 1px solid var(--warn); background: transparent; color: var(--warn); cursor: pointer; }
+.panic-btn:hover { background: var(--bg-2); }
+.panic-btn.active { background: var(--warn); color: #1a1400; }
+.agent-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.agent-card { border: 1px solid var(--line-2); border-left: 3px solid var(--line-2); border-radius: var(--radius); background: var(--bg-2); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.agent-card .ac-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.agent-card .ac-head .avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--bg-1); border: 1px solid var(--line-2); display: inline-flex; align-items: center; justify-content: center; color: var(--accent); flex-shrink: 0; }
+.agent-card .ac-name { font-weight: 600; color: var(--fg-0); }
+.agent-card .ac-last { font-size: 12px; overflow-wrap: anywhere; }
+.input.sm { padding: 2px 6px; font-size: 12px; }
+.sala-card { border: 1px solid var(--line-2); border-left: 3px solid var(--accent-line); border-radius: var(--radius); background: var(--bg-2); padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.sala-card.ok { border-left-color: var(--ok); }
+.sala-card.warn { border-left-color: var(--warn); }
+.sala-card .sc-head { display: flex; align-items: center; gap: 6px; color: var(--fg-0); font-weight: 560; }
+.sala-card .sc-head svg { color: var(--accent); flex-shrink: 0; }
+.sala-card .sc-text { color: var(--fg-1); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.turn-notice { cursor: default; }
+.turn-notice > span { white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn-notice:not(.open) > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Project controls in the top bar: approvals, panic, stop-work, in that order of severity. */
+.topbar .controls { display: flex; align-items: center; gap: 6px; }
+.approvals-btn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent); cursor: pointer; }
+.approvals-btn:hover { background: rgba(157, 140, 255, 0.2); }
+.topbar .panic-btn { height: 26px; padding: 0 10px; font-size: 13px; }
+.panel-toolbar { min-height: 34px; padding: 4px 12px; }
+.clickable-text { cursor: pointer; }
+.clickable-text:hover { color: var(--fg-0); text-decoration: underline; }
+/* Findings: severity is the first thing you see, the rest is a second line. */
+.finding-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 12px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--line-2); cursor: pointer; }
+.finding-row:hover { background: var(--bg-2); }
+.finding-row.sev-critical { border-left-color: var(--sev-critical); }
+.finding-row.sev-high { border-left-color: var(--sev-high); }
+.finding-row.sev-medium { border-left-color: var(--sev-medium); }
+.finding-row.sev-low { border-left-color: var(--sev-low); }
+.finding-row.sev-info { border-left-color: var(--sev-info); }
+.finding-row .fr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.finding-row .fr-title { color: var(--fg-0); font-size: 13.5px; font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.finding-row .fr-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; flex-wrap: wrap; }
+.finding-row .fr-side { display: flex; align-items: center; gap: 8px; font-size: 11.5px; flex-shrink: 0; }
+.empty .empty-actions { display: flex; gap: 6px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
+.ports { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
+.ports .port { font-size: 11px; padding: 0 5px; border: 1px solid var(--line-2); border-radius: 3px; color: var(--fg-1); white-space: nowrap; }
+.sala-card .sc-who { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+.sala-card .sc-avatar { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--bg-1); border: 1px solid var(--line-2); color: var(--accent); }
+.sala-card .sc-name { color: var(--fg-0); font-weight: 600; }
+.sala-card .sc-title { color: var(--fg-0); font-weight: 560; }
+.sala-card .sc-more { height: 18px; padding: 0 4px; margin-left: 4px; }
+/* "Esperándote": what the agents need from the operator, always above the composer. */
+.waiting { margin: 0 10px 6px; border: 1px solid var(--warn); border-radius: var(--radius); background: rgba(214, 178, 110, 0.06); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+.waiting .w-head { display: flex; align-items: center; gap: 6px; color: var(--warn); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+.waiting .w-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--fg-1); }
+.waiting .wq { display: flex; flex-direction: column; gap: 5px; }
+.waiting .wq-q { display: flex; gap: 6px; align-items: flex-start; color: var(--fg-0); line-height: 1.4; }
+.waiting .wq-q svg { flex-shrink: 0; margin-top: 2px; color: var(--warn); }
+.waiting .wq-a { display: flex; gap: 6px; }
+.waiting .wq-a .input { flex: 1; }
+.waiting.idle { border-color: var(--line); background: transparent; flex-direction: row; align-items: center; gap: 6px; color: var(--fg-3); font-size: 12px; padding: 5px 10px; }
+.waiting .wq-d { color: var(--fg-2); font-size: 12px; line-height: 1.45; white-space: pre-wrap; max-height: 96px; overflow: auto; }

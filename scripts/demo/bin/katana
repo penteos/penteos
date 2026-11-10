@@ -1,0 +1,16 @@
+#!/bin/sh
+# Demo stand-in (screenshots only): canned output for the fictional acme-corp.test network. No network.
+for a in "$@"; do [ "$a" = "-version" ] && { echo "Current Version: v1.2.2"; exit 0; }; done
+cat <<'OUT'
+{"request": {"method": "GET", "endpoint": "https://app.acme-corp.test/login"}, "response": {"status_code": 200}}
+{"request": {"method": "GET", "endpoint": "https://app.acme-corp.test/dashboard"}, "response": {"status_code": 200}}
+{"request": {"method": "GET", "endpoint": "https://app.acme-corp.test/orders"}, "response": {"status_code": 200}}
+{"request": {"method": "GET", "endpoint": "https://app.acme-corp.test/invoices"}, "response": {"status_code": 200}}
+{"request": {"method": "GET", "endpoint": "https://app.acme-corp.test/settings/profile"}, "response": {"status_code": 200}}
+{"request": {"method": "GET", "endpoint": "https://api.acme-corp.test/api/v2/orders"}, "response": {"status_code": 200}}
+{"request": {"method": "GET", "endpoint": "https://api.acme-corp.test/api/v2/invoices/88231"}, "response": {"status_code": 200}}
+{"request": {"method": "GET", "endpoint": "https://api.acme-corp.test/api/v2/users/me"}, "response": {"status_code": 200}}
+{"request": {"method": "POST", "endpoint": "https://api.acme-corp.test/api/v2/auth/refresh"}, "response": {"status_code": 200}}
+{"request": {"method": "POST", "endpoint": "https://api.acme-corp.test/api/v2/auth/login"}, "response": {"status_code": 401}}
+{"request": {"method": "GET", "endpoint": "https://app.acme-corp.test/static/js/main.4f2a9c.js"}, "response": {"status_code": 200}}
+OUT

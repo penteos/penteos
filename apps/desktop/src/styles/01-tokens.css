@@ -1,0 +1,64 @@
+/* ------------------------------------------------------------------------------------------ */
+/* Tokens - flat, dark violet, one accent used sparingly                                      */
+/* ------------------------------------------------------------------------------------------ */
+
+:root {
+  --bg-0: #0c0a10;          /* chrome: title bar, activity bar, tabs strip, status bar */
+  --bg-1: #110e16;          /* editor and panels */
+  --bg-2: #16131c;          /* inputs, raised rows */
+  --bg-3: #1d1925;          /* hover */
+  --bg-4: #262030;          /* selected */
+  --line: #211c29;
+  --line-2: #2d2738;
+
+  --fg-0: #eceaf1;
+  --fg-1: #c3bfcd;
+  --fg-2: #8d8799;
+  --fg-3: #7a7489;          /* 4.6:1 on bg-1: informative text stays readable */
+
+  --accent: #9d8cff;
+  --accent-strong: #7c6cf0;
+  --accent-soft: rgba(157, 140, 255, 0.12);
+  --accent-line: rgba(157, 140, 255, 0.45);
+
+  --ok: #6cc69a;
+  --warn: #d6b26e;
+  --bad: #e5717d;
+  --bad-strong: #c94b5a;
+
+  --sev-critical: #e5717d;
+  --sev-high: #e0956b;
+  --sev-medium: #d6b26e;
+  --sev-low: #8fa8d8;
+  --sev-info: #8d8799;
+
+  --font-ui: "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --radius: 4px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg-0);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::selection { background: rgba(157, 140, 255, 0.3); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #2a2433; border: 3px solid transparent; background-clip: content-box; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3346; background-clip: content-box; border: 3px solid transparent; }
+::-webkit-scrollbar-track { background: transparent; }
+
+button { font: inherit; color: inherit; }
+input, select, textarea { font: inherit; color: var(--fg-0); }
+.mono { font-family: var(--font-mono); font-size: 12px; font-variant-ligatures: none; }
+.muted { color: var(--fg-3); }
+
+/* ------------------------------------------------------------------------------------------ */

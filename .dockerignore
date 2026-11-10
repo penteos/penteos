@@ -1,0 +1,8 @@
+**/node_modules
+.git
+apps/desktop/release
+apps/desktop/build
+apps/desktop/dist
+build
+data
+engagements

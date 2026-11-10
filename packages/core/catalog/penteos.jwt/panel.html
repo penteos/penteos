@@ -1,0 +1,34 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  :root { color-scheme: dark; }
+  body { margin: 14px; font: 13px/1.5 system-ui, sans-serif; color: #ddd9e6; background: #110e16; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 90px; resize: vertical; background: #16131c; color: #eceaf1; border: 1px solid #2d2738; border-radius: 4px; padding: 8px; font: 12px ui-monospace, monospace; }
+  button { margin-top: 8px; background: #9d8cff; color: #110e16; border: 0; border-radius: 4px; padding: 6px 14px; font-weight: 600; cursor: pointer; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  pre { margin: 0; background: #0c0a10; border: 1px solid #211c29; border-radius: 4px; padding: 8px; font: 12px ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; }
+  h4 { margin: 12px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #8d8799; }
+  .issue { padding: 6px 8px; border-left: 2px solid #2d2738; margin: 4px 0; }
+  .critical, .high { border-color: #e5717d; } .medium { border-color: #d6b26e; } .low { border-color: #8fa8d8; }
+  .sev { font: 11px ui-monospace, monospace; text-transform: uppercase; margin-right: 6px; color: #8d8799; }
+  .err { color: #e5717d; margin-top: 8px; }
+</style></head>
+<body>
+  <textarea id="token" placeholder="eyJhbGciOi…"></textarea>
+  <button id="go">Inspect</button>
+  <div id="err" class="err"></div>
+  <div id="out"></div>
+<script>
+  // No network here: the token goes only to the plugin's own operation, on this machine.
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  document.getElementById("go").onclick = async () => {
+    document.getElementById("err").textContent = "";
+    try {
+      const r = await penteos.call("inspect", { token: document.getElementById("token").value });
+      document.getElementById("out").innerHTML =
+        '<div class="cols"><div><h4>Header</h4><pre>' + esc(JSON.stringify(r.header, null, 2)) + '</pre></div><div><h4>Payload</h4><pre>' + esc(JSON.stringify(r.payload, null, 2)) + "</pre></div></div>" +
+        "<h4>Issues</h4>" + r.issues.map((i) => '<div class="issue ' + esc(i.severity) + '"><span class="sev">' + esc(i.severity) + "</span><b>" + esc(i.title) + "</b><div>" + esc(i.detail) + "</div></div>").join("");
+    } catch (e) {
+      document.getElementById("err").textContent = e.message;
+    }
+  };
+</script></body></html>

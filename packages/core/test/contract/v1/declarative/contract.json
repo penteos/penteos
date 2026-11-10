@@ -1,0 +1,39 @@
+{
+  "operation": "everything",
+  "input": {
+    "ip": "{{fixtures.hosts[0].ip}}"
+  },
+  "fixtures": {
+    "hosts": [
+      "203.0.113.40"
+    ]
+  },
+  "responses": [
+    {
+      "method": "POST",
+      "url": "https://api.contract.test/items",
+      "body": {
+        "items": [
+          {
+            "name": "a"
+          },
+          {
+            "name": "b"
+          },
+          {
+            "name": "c"
+          }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "result": {
+      "runs": 1
+    },
+    "steps": 13,
+    "entities": 2,
+    "findings": 1,
+    "annotations": 1
+  }
+}

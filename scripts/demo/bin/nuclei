@@ -1,0 +1,9 @@
+#!/bin/sh
+# Demo stand-in (screenshots only): canned output for the fictional acme-corp.test network. No network.
+for a in "$@"; do [ "$a" = "-version" ] && { echo "Nuclei Engine Version: v3.4.10"; exit 0; }; done
+cat <<'OUT'
+{"template-id": "jenkins-script-console", "type": "http", "host": "staging.acme-corp.test", "matched-at": "http://staging.acme-corp.test:8080/script", "info": {"name": "Jenkins Script Console - Unauthenticated", "severity": "critical", "description": "The Jenkins script console is reachable without authentication and runs Groovy code on the server."}}
+{"template-id": "http-missing-security-headers", "type": "http", "host": "app.acme-corp.test", "matched-at": "https://app.acme-corp.test", "info": {"name": "HTTP Missing Security Headers", "severity": "info", "description": "Content-Security-Policy and Strict-Transport-Security are not set."}}
+{"template-id": "ftp-anonymous-login", "type": "tcp", "host": "staging.acme-corp.test", "matched-at": "staging.acme-corp.test:21", "info": {"name": "FTP Anonymous Login", "severity": "medium", "description": "The FTP server accepts the anonymous user."}}
+{"template-id": "deprecated-tls", "type": "ssl", "host": "vpn.acme-corp.test", "matched-at": "vpn.acme-corp.test:443", "info": {"name": "Deprecated TLS Detection (TLS 1.0)", "severity": "low", "description": "The server still negotiates TLS 1.0."}}
+OUT
