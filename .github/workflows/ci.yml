@@ -25,6 +25,23 @@ jobs:
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: pnpm test
 
+  # The same checks on macOS (Apple Silicon): what breaks on a Mac shows the day it breaks, not at
+  # release time. Linux-only mechanisms (bubblewrap, /proc, setcap) have their Mac counterparts
+  # tested here.
+  check-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @penteos/schema build
+      - run: pnpm typecheck
+      - run: pnpm test
+
   # Plugins written against every supported apiVersion, and the ones that ship with Penteos,
   # still validate, activate and do what they must. A change that breaks one does not ship.
   plugin-contract:
