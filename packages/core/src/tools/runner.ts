@@ -40,7 +40,7 @@ import { mb, runForIdentity, ToolboxError } from "./toolbox.js";
 import { AUTO_INSTALL_DEFAULT, type AutoInstall, CAPABILITIES, type CapabilityId, type Gap, listGaps, openGap, PHASE_CAPABILITIES, updateGap } from "./capabilities.js";
 import { builtinCommonPaths, builtinCrawl, builtinDns, builtinHttpProbe, builtinPortScan, builtinSubdomains } from "./builtins.js";
 import { getPlan } from "../plan.js";
-import { adaptNmap, canAskPassword, captureState, systemInstallArgv, which, withPassword } from "./system.js";
+import { adaptNmap, canAskPassword, captureState, personAtDesktop, systemInstallArgv, which, withPassword } from "./system.js";
 import { detectPackageManager } from "./registry.js";
 import { describeRule, type ReplaceRule, validateRule } from "../proxy/intercept.js";
 
@@ -1987,8 +1987,9 @@ export class ToolRunner {
     if (box?.asset(name)) return this.installFromCatalog(name, by);
     const manifest = this.registry.get(name);
     if (!manifest?.install) throw new Error(`${name} has no install recipe`);
-    // Homebrew (macOS) installs without root: the command runs as it is, seen as a run.
-    if (manifest.install.method === "system" && detectPackageManager() === "brew" && manifest.install.packages.brew) {
+    // Homebrew (macOS) installs without root: the command runs as it is, seen as a run, when a
+    // person started Penteos from the desktop (never from the test suite or a server).
+    if (manifest.install.method === "system" && personAtDesktop() && detectPackageManager() === "brew" && manifest.install.packages.brew) {
       return this.installWithBrew(name, manifest.install.packages.brew, by);
     }
     if (manifest.install.method === "system" && process.platform === "darwin" && !detectPackageManager()) {

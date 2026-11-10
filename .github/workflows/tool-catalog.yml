@@ -1,0 +1,42 @@
+name: tool-catalog
+
+# Regenerates the verified tool catalog (packages/core/src/tools/catalog-data.ts) on GitHub's
+# machines: every release file is downloaded and checked against its project's checksums here, not
+# on a developer's computer. The result is uploaded as an artifact for a person to review and
+# commit; nothing is pushed by this workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Tools to refresh (comma-separated), empty for all"
+        required: false
+        default: ""
+  push:
+    branches: [mac]
+    paths:
+      - scripts/tools/refresh-catalog.mjs
+      - .github/workflows/tool-catalog.yml
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Refresh the catalog
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ONLY: ${{ github.event.inputs.only || 'subfinder,dnsx,httpx,nuclei,katana,interactsh-client,ffuf,gobuster,uv' }}
+        run: pnpm exec tsx scripts/tools/refresh-catalog.mjs ${ONLY:+--only "$ONLY"}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: catalog-data
+          path: packages/core/src/tools/catalog-data.ts

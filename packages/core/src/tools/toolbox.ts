@@ -143,7 +143,7 @@ export class Toolbox {
   asset(name: string): CatalogAsset | undefined {
     const e = this.entry(name);
     if (!e || !this.platform) return undefined;
-    if (e.via === "uv") return e.uv && this.entry("uv")?.assets[this.platform] && this.platform.startsWith("linux") ? { url: "uv", sha256: "", size: e.uv.size, format: "raw", bin: e.binary } : undefined;
+    if (e.via === "uv") return e.uv && this.entry("uv")?.assets[this.platform] && (this.platform.startsWith("linux") || this.platform.startsWith("darwin")) ? { url: "uv", sha256: "", size: e.uv.size, format: "raw", bin: e.binary } : undefined;
     return e.assets[this.platform];
   }
 

@@ -38,7 +38,7 @@ const SOURCES = [
   { name: "ffuf", repo: "ffuf/ffuf", version: "2.3.0", binary: "ffuf", license: "MIT", minVersion: "2.0.0" },
   { name: "gobuster", repo: "OJ/gobuster", version: "3.8.2", binary: "gobuster", license: "Apache-2.0", minVersion: "3.6.0" },
   // uv: static (musl) builds, so they run on any distribution; it installs the Python tools below.
-  { name: "uv", repo: "astral-sh/uv", version: "0.13.7", binary: "uv", license: "MIT OR Apache-2.0", tag: "", patterns: { "linux-x64": /^uv-x86_64-unknown-linux-musl\.tar\.gz$/, "linux-arm64": /^uv-aarch64-unknown-linux-musl\.tar\.gz$/ } },
+  { name: "uv", repo: "astral-sh/uv", version: "0.13.7", binary: "uv", license: "MIT OR Apache-2.0", tag: "", patterns: { "linux-x64": /^uv-x86_64-unknown-linux-musl\.tar\.gz$/, "linux-arm64": /^uv-aarch64-unknown-linux-musl\.tar\.gz$/, "darwin-x64": /^uv-x86_64-apple-darwin\.tar\.gz$/, "darwin-arm64": /^uv-aarch64-apple-darwin\.tar\.gz$/ } },
 ];
 
 /** Python tools, installed by uv with every package's hash locked. */
@@ -47,7 +47,10 @@ const PY_SOURCES = [{ name: "sqlmap", spec: "sqlmap==1.10.11", version: "1.10.11
 const PLATFORMS = {
   "linux-x64": /linux[_-](amd64|x86_64)\.(zip|tar\.gz)$/i,
   "linux-arm64": /linux[_-](arm64|aarch64)\.(zip|tar\.gz)$/i,
-  // macOS and Windows join when Penteos ships there (darwin-x64, darwin-arm64, win32-x64).
+  // ProjectDiscovery names them macOS_*, ffuf and gobuster darwin_* / Darwin_*.
+  "darwin-x64": /(macos|darwin)[_-](amd64|x86_64)\.(zip|tar\.gz)$/i,
+  "darwin-arm64": /(macos|darwin)[_-](arm64|aarch64)\.(zip|tar\.gz)$/i,
+  // Windows joins when Penteos ships there (win32-x64).
 };
 
 const gh = async (path) => {

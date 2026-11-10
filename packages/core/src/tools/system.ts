@@ -28,6 +28,15 @@ export function which(binary: string, path = process.env.PATH ?? ""): string | u
  * (PENTEOS_PASSWORD_PROMPTS=1: a person is in front of it), with pkexec and a graphical session.
  * A core on its own, a team server or the test suite never opens one: they show the command.
  */
+/**
+ * Whether the desktop app started this core with a person in front of it: only then does Penteos
+ * act on the system by itself (a password window, a Homebrew install). A core on its own, a team
+ * server or the test suite never does: they show the command instead.
+ */
+export function personAtDesktop(): boolean {
+  return process.env.PENTEOS_PASSWORD_PROMPTS === "1";
+}
+
 export function canAskPassword(): boolean {
   return process.env.PENTEOS_PASSWORD_PROMPTS === "1" && Boolean(which("pkexec") && (process.env.DISPLAY || process.env.WAYLAND_DISPLAY));
 }

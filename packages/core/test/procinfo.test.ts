@@ -40,3 +40,23 @@ describe("lsof (macOS)", () => {
     ]);
   });
 });
+
+describe.runIf(process.platform === "darwin")("on this Mac", () => {
+  it("sees a busy process's CPU time grow and its tree", async () => {
+    const { spawn } = await import("node:child_process");
+    const { psTable } = await import("../src/plugins/procinfo.js");
+    const busy = spawn(process.execPath, ["-e", "const end = Date.now() + 3000; while (Date.now() < end) {}"], { stdio: "ignore" });
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      const first = psTable().find((r) => r.pid === busy.pid);
+      await new Promise((r) => setTimeout(r, 900));
+      const second = psTable().find((r) => r.pid === busy.pid);
+      expect({ first, second }).toMatchObject({ first: { pid: busy.pid }, second: { pid: busy.pid } });
+      // About 900 ms of one CPU in 900 ms: allow for a loaded machine.
+      expect(second!.cpuMs - first!.cpuMs, JSON.stringify({ first, second })).toBeGreaterThan(400);
+      expect(treeOf(psTable(), process.pid)).toContain(busy.pid);
+    } finally {
+      busy.kill();
+    }
+  });
+});
