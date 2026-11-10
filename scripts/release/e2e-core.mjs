@@ -93,7 +93,8 @@ try {
       return `${tool} ${st.version} (user ${uid === 0 ? "root" : uid})`;
     };
     await step("tools: ffuf from the catalog, no root", () => install("ffuf"));
-    if (process.arch === "x64") await step("tools: official nmap from nmap.org, no root", () => install("nmap"));
+    // nmap.org publishes a Linux x86_64 package only; on macOS nmap comes from Homebrew.
+    if (process.arch === "x64" && process.platform === "linux") await step("tools: official nmap from nmap.org, no root", () => install("nmap"));
     await step("tools: sqlmap with uv and its own Python, no root", () => install("sqlmap"));
     await step("port_scan capability (with the tool or the built-in method)", async () => {
       const { createServer } = await import("node:http");
