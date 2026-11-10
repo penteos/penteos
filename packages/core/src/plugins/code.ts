@@ -519,7 +519,13 @@ export class CodePluginProcess {
         if (mb > this.memoryCeilingMb) return this.end(`it used more than ${this.memoryCeilingMb} MB of memory`);
       }
       const now = cpuMs(child.pid);
-      if (now === undefined || last === undefined) return;
+      if (now === undefined) return;
+      // No first reading yet (the process table may have been read just before it started): this
+      // one becomes the baseline, and the next sample measures from it.
+      if (last === undefined) {
+        last = now;
+        return;
+      }
       const share = (now - last) / this.limits.sampleMs;
       last = now;
       busy = this.calls.size === 0 && share > this.limits.idleCpuShare ? busy + 1 : 0;

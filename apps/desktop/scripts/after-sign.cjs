@@ -11,10 +11,14 @@ exports.default = async function afterSign(context) {
   const app = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
   const sign = (target) => execFileSync("codesign", ["--force", "--sign", "-", "--timestamp=none", target], { stdio: "inherit" });
   // Inside out: what is nested has to be signed before what contains it.
-  const nested = execFileSync("find", [app, "(", "-name", "*.node", "-o", "-name", "spawn-helper", "-o", "-name", "*.dylib", "-o", "-name", "*.framework", "-o", "-name", "*.app", ")", "-not", "-path", app], { encoding: "utf8" })
+  // Every real binary (Mach-O), inside bundles too, then the bundles (frameworks, helper apps):
+  // deepest first, so whatever is nested is signed before what contains it.
+  const bundles = execFileSync("find", [app, "(", "-name", "*.framework", "-o", "-name", "*.app", ")", "-type", "d", "-not", "-path", app], { encoding: "utf8" }).split("\n").filter(Boolean);
+  const files = execFileSync("find", [app, "-type", "f", "(", "-name", "*.node", "-o", "-name", "*.dylib", "-o", "-perm", "-u+x", ")"], { encoding: "utf8" })
     .split("\n")
     .filter(Boolean)
-    .sort((a, b) => b.split("/").length - a.split("/").length);
+    .filter((f) => /Mach-O/.test(execFileSync("file", ["-b", f], { encoding: "utf8" })));
+  const nested = [...files, ...bundles].sort((a, b) => b.split("/").length - a.split("/").length);
   for (const file of nested) sign(file);
   sign(app);
   execFileSync("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app], { stdio: "inherit" });

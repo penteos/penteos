@@ -2,7 +2,7 @@
 // terminal), already rebuilt for Electron and for this package's architecture, into the app before
 // the AppImage, .deb, .rpm and .tar.gz are made. An architecture built without it ships without it
 // (the terminal then uses its fallback mode).
-const { chmodSync, cpSync, existsSync, readFileSync, renameSync, writeFileSync } = require("node:fs");
+const { chmodSync, cpSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } = require("node:fs");
 const path = require("node:path");
 
 // electron-builder's Arch enum: 0 ia32, 1 x64, 2 armv7l, 3 arm64, 4 universal.
@@ -18,6 +18,12 @@ exports.default = async function afterPack(context) {
   const resources = context.electronPlatformName === "darwin" ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, "Contents", "Resources") : path.join(context.appOutDir, "resources");
   const to = path.join(resources, "core", "node_modules");
   cpSync(from, to, { recursive: true, dereference: true });
+  // Only what runs: the module, its helper and its code. Compiler leftovers (object files,
+  // dependency lists under build/Release/.deps and obj.target) would only weigh, and on macOS
+  // confuse signing.
+  for (const dir of ["build/Release/.deps", "build/Release/obj.target", "build/Release/obj", "build/Debug", "build/node_gyp_bins"]) {
+    rmSync(path.join(to, "node-pty", dir), { recursive: true, force: true });
+  }
   // node-pty's spawn-helper (macOS) must stay executable, whatever the copy did with its mode.
   if (context.electronPlatformName === "darwin") {
     for (const dir of ["build/Release", "build/Debug"]) {
