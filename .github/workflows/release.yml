@@ -78,11 +78,17 @@ jobs:
           version="$(cat out/VERSION)"
           awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on' CHANGELOG.md > notes.md
           test -s notes.md
+      - name: Stable names, so releases/latest/download/<name> always gets the newest version
+        run: |
+          cd out
+          version="$(cat VERSION)"
+          for f in penteos-"$version"-*; do cp "$f" "penteos-${f#penteos-$version-}"; done
+          sha256sum penteos-* > SHA256SUMS
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           pre=""
           case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" out/penteos-* out/SHA256SUMS out/install.sh \
+          gh release create "$GITHUB_REF_NAME" out/penteos-* out/SHA256SUMS out/VERSION out/install.sh \
             --title "Penteos ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag $pre

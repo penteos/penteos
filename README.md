@@ -41,21 +41,19 @@ curl -fsSL https://github.com/penteos/penteos/releases/latest/download/install.s
 
 It picks the right package for your distribution and checks it against the release's `SHA256SUMS`
 before installing anything. Add `-s -- --appimage` to install the AppImage in `~/.local/bin`
-without root. Prefer to download by hand:
+without root. Or download a package directly:
 
-| Package | For |
-|---|---|
-| **AppImage** (recommended) | Any distribution, one file |
-| `.deb` | Debian, Ubuntu, Kali, Mint, Pop!_OS |
-| `.rpm` | Fedora, RHEL, Rocky, openSUSE |
-| `.tar.gz` | Arch and everything else |
-
-From [Releases](https://github.com/penteos/penteos/releases/latest):
+| Package | x86_64 | arm64 | For |
+|---|---|---|---|
+| **AppImage** (recommended) | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-x86_64.AppImage) | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-arm64.AppImage) | Any distribution, one file |
+| `.deb` | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-amd64.deb) | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-arm64.deb) | Debian, Ubuntu, Kali, Mint, Pop!_OS |
+| `.rpm` | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-x86_64.rpm) | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-aarch64.rpm) | Fedora, RHEL, Rocky, openSUSE |
+| `.tar.gz` | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-x64.tar.gz) | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-arm64.tar.gz) | Arch and everything else |
 
 ```sh
-chmod +x penteos-0.1.0-x86_64.AppImage && ./penteos-0.1.0-x86_64.AppImage
+chmod +x penteos-x86_64.AppImage && ./penteos-x86_64.AppImage
 # or, on Debian and Ubuntu
-sudo apt install ./penteos-0.1.0-amd64.deb
+sudo apt install ./penteos-amd64.deb
 ```
 
 Every file ships with a checksum: `sha256sum -c SHA256SUMS`.
