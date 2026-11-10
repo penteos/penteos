@@ -25,7 +25,7 @@ export const BUILTIN_MANIFESTS: unknown[] = [
     identity: PD_IDENTITY,
     risk: "passive",
     attack: ["T1596"],
-    targets: { flags: ["-d", "-domain"], positional: false, fileFlags: ["-dL", "-list"] },
+    targets: { flags: ["-d", "-domain"], positional: false, fileFlags: ["-dL", "-list"], form: "host" },
     valueFlags: ["-s", "-sources", "-es", "-exclude-sources", "-t", "-timeout", "-max-time", "-o", "-output", "-rl", "-r", "-rL", "-config", "-pc", "-proxy"],
     invoke: { base: ["-silent"], perTarget: ["-d", "{{target}}"] },
     output: {
@@ -42,7 +42,7 @@ export const BUILTIN_MANIFESTS: unknown[] = [
     identity: PD_IDENTITY,
     risk: "passive",
     attack: ["T1590.002"],
-    targets: { flags: ["-d", "-domain"], positional: false, fileFlags: ["-l", "-list"] },
+    targets: { flags: ["-d", "-domain"], positional: false, fileFlags: ["-l", "-list"], form: "host" },
     valueFlags: ["-w", "-wordlist", "-r", "-resolver", "-t", "-threads", "-rl", "-o", "-output"],
     invoke: { base: ["-silent", "-a", "-aaaa", "-cname", "-resp"], perTarget: ["-d", "{{target}}"] },
     output: {
@@ -76,7 +76,7 @@ export const BUILTIN_MANIFESTS: unknown[] = [
     identity: { args: ["-v"], pattern: "DiG \\d" },
     risk: "passive",
     attack: ["T1590.002"],
-    targets: { flags: ["-q", "-x"], positional: true, fileFlags: ["-f"], ignore: ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "PTR", "SRV", "CAA", "ANY", "AXFR", "IN"] },
+    targets: { flags: ["-q", "-x"], positional: true, fileFlags: ["-f"], ignore: ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "PTR", "SRV", "CAA", "ANY", "AXFR", "IN"], form: "host" },
     valueFlags: ["-p", "-t", "-c", "-b", "-k", "-y"],
     invoke: {
       base: ["+noall", "+answer"],

@@ -194,3 +194,46 @@ describe("invalid input", () => {
     expect(check("*.cliente.example")).toMatchObject({ decision: "deny", code: "INVALID_TARGET" });
   });
 });
+
+describe("a web application in scope, and its name", () => {
+  // The scope of a web test: the application's URL only, as the wizard writes it.
+  const web: ScopeRule[] = [
+    { id: "inc-app", effect: "include", target: { type: "url", value: "https://pay.cliente.example" } },
+    { id: "inc-api", effect: "include", target: { type: "url", value: "https://api.cliente.example/v2/" } },
+    { id: "exc-admin", effect: "exclude", target: { type: "url", value: "https://pay.cliente.example/admin/" } },
+  ];
+  const run = (target: string, risk: "passive" | "active" | "intrusive") => evaluateScope(engagement, web, { target, risk, actor: human });
+
+  it("allows passive lookups of the name (DNS, subdomains from public sources)", () => {
+    expect(run("pay.cliente.example", "passive")).toMatchObject({ decision: "allow", ruleId: "inc-app" });
+    // Even when the rule is one path of the application: a lookup touches no path.
+    expect(run("api.cliente.example", "passive")).toMatchObject({ decision: "allow", ruleId: "inc-api" });
+  });
+
+  it("holds anything active to the application's port, and says how to write it", () => {
+    const bare = run("pay.cliente.example", "active");
+    expect(bare).toMatchObject({ decision: "deny", code: "OUT_OF_SCOPE", ruleId: "inc-app" });
+    expect(bare.decision === "deny" && bare.reason).toContain("pay.cliente.example:443");
+    expect(run("pay.cliente.example:443", "active")).toMatchObject({ decision: "allow", ruleId: "inc-app" });
+    expect(run("pay.cliente.example:22", "active")).toMatchObject({ decision: "deny", code: "OUT_OF_SCOPE" });
+    // A rule for one path of an origin never covers the whole host, on any port.
+    expect(run("api.cliente.example:443", "active")).toMatchObject({ decision: "deny", code: "OUT_OF_SCOPE" });
+  });
+
+  it("does not widen to other names: subdomains and the parent stay out", () => {
+    expect(run("cliente.example", "passive")).toMatchObject({ decision: "deny", code: "OUT_OF_SCOPE" });
+    expect(run("qa.pay.cliente.example", "passive")).toMatchObject({ decision: "deny", code: "OUT_OF_SCOPE" });
+  });
+
+  it("an exclusion of one path does not exclude the name; one of the whole origin does", () => {
+    expect(run("pay.cliente.example", "passive")).toMatchObject({ decision: "allow" });
+    const whole: ScopeRule[] = [...web, { id: "exc-all", effect: "exclude", target: { type: "url", value: "https://pay.cliente.example/" } }];
+    expect(evaluateScope(engagement, whole, { target: "pay.cliente.example", risk: "passive", actor: human })).toMatchObject({ decision: "deny", ruleId: "exc-all" });
+  });
+
+  it("a host in scope only on some ports may still be looked up by name", () => {
+    const ports: ScopeRule[] = [{ id: "inc-443", effect: "include", target: { type: "domain", value: "pay.cliente.example" }, ports: "443" }];
+    expect(evaluateScope(engagement, ports, { target: "pay.cliente.example", risk: "passive", actor: human })).toMatchObject({ decision: "allow" });
+    expect(evaluateScope(engagement, ports, { target: "pay.cliente.example", risk: "active", actor: human })).toMatchObject({ decision: "deny", code: "OUT_OF_SCOPE" });
+  });
+});

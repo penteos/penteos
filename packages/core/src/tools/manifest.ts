@@ -79,8 +79,13 @@ export const ToolManifest = z.object({
       fileFlags: z.array(z.string()).default([]),
       /** Bare words that are never targets (record types, protocol names…), case-insensitive. */
       ignore: z.array(z.string()).default([]),
+      /**
+       * What a target has to look like for this tool: "host" for tools that take a name (DNS,
+       * subdomain discovery), which get the host of a URL instead of the URL; "any" otherwise.
+       */
+      form: z.enum(["any", "host"]).default("any"),
     })
-    .default({ flags: [], positional: false, fileFlags: [], ignore: [] }),
+    .default({ flags: [], positional: false, fileFlags: [], ignore: [], form: "any" }),
   /** Flags that take a value, so their values are not mistaken for positional targets. */
   valueFlags: z.array(z.string()).default([]),
   /**
@@ -147,10 +152,48 @@ export function manifestTargets(manifest: ToolManifest, argv: string[]): { targe
   return { targets: [...new Set(targets)] };
 }
 
+/**
+ * A target in the form the tool takes: a DNS or subdomain tool given https://app.example.com/x
+ * gets app.example.com. Anything that is not a URL is left alone. The scope check runs on the
+ * converted target, so a tool never reaches more than what was evaluated.
+ */
+export function targetForTool(manifest: Pick<ToolManifest, "targets">, target: string): string {
+  if (manifest.targets.form !== "host" || !/^[a-z][a-z0-9+.-]*:\/\//i.test(target.trim())) return target;
+  try {
+    return new URL(target.trim()).hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
+  } catch {
+    return target;
+  }
+}
+
+/** The command's arguments with every target value in the form the tool takes (see targetForTool). */
+export function argsForTool(manifest: ToolManifest, argv: string[]): string[] {
+  if (manifest.targets.form !== "host") return argv;
+  const valueFlags = new Set([...manifest.valueFlags, ...manifest.targets.flags, ...manifest.targets.fileFlags]);
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (arg.startsWith("-")) {
+      const eq = arg.indexOf("=");
+      const flag = eq >= 0 ? arg.slice(0, eq) : arg;
+      const isTarget = manifest.targets.flags.includes(flag);
+      const fix = (v: string) => (isTarget ? v.split(",").map((x) => targetForTool(manifest, x)).join(",") : v);
+      if (eq >= 0) out.push(`${flag}=${fix(arg.slice(eq + 1))}`);
+      else {
+        out.push(arg);
+        if (valueFlags.has(flag) && i + 1 < argv.length) out.push(fix(argv[++i]!));
+      }
+      continue;
+    }
+    out.push(manifest.targets.positional ? targetForTool(manifest, arg) : arg);
+  }
+  return out;
+}
+
 /** argv for tool.run: base args, then perTarget args for each target. */
 export function manifestInvocation(manifest: ToolManifest, targets: string[]): string[] {
   if (!manifest.invoke) throw new Error(`${manifest.name} has no 'invoke' section; pass explicit args`);
-  return [...manifest.invoke.base, ...targets.flatMap((t) => manifest.invoke!.perTarget.map((a) => a.replaceAll("{{target}}", t)))];
+  return [...manifest.invoke.base, ...targets.flatMap((t) => manifest.invoke!.perTarget.map((a) => a.replaceAll("{{target}}", targetForTool(manifest, t))))];
 }
 
 /** The manifest's polite defaults for the flags the command does not set itself. */

@@ -111,3 +111,21 @@ it("nuclei runs gently unless told otherwise", async () => {
   expect(withDefaults(nuclei, ["-u", "https://a.lab"])).toEqual(["-u", "https://a.lab", "-rl", "20", "-c", "10"]);
   expect(withDefaults(nuclei, ["-u", "https://a.lab", "-rl", "100"])).toEqual(["-u", "https://a.lab", "-rl", "100", "-c", "10"]);
 });
+
+it("evidence attached by mistake can be taken off, never the last piece", async () => {
+  const { id } = await finding();
+  const ev = async (text: string) => ((await executeOperation("evidence.from_raw", { rawId: eng.putRaw(text, { type: "stdout", mime: "text/plain" }), caption: text }, ctx())) as { id: string }).id;
+  const right = await ev("POST /api/auth/sign-in -> 429 tras 10 intentos");
+  const wrong = await ev("GET /api/user -> 401 (de otra prueba)");
+  await executeOperation("finding.update", { id, addEvidenceIds: [right, wrong] }, ctx());
+  await executeOperation("finding.update", { id, removeEvidenceIds: [wrong] }, ctx());
+  expect(eng.get(id)!.attributes.evidenceIds).toEqual([right]);
+  // It stays in the project: only no longer backs this finding.
+  expect(eng.get(wrong)?.kind).toBe("evidence");
+  // No proof, no finding: the last piece only goes with a replacement in the same call.
+  await expect(executeOperation("finding.update", { id, removeEvidenceIds: [right] }, ctx())).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  await expect(executeOperation("finding.update", { id, removeEvidenceIds: [wrong] }, ctx())).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  const other = await ev("POST /api/auth/sign-in -> 429, medición del verificador");
+  await executeOperation("finding.update", { id, addEvidenceIds: [other], removeEvidenceIds: [right] }, ctx());
+  expect(eng.get(id)!.attributes.evidenceIds).toEqual([other]);
+});

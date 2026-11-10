@@ -36,6 +36,7 @@ export * from "./fuzz.js";
 export * from "./language.js";
 export { AGENT_BROWSER_SOURCE, agentBrowserKind, closeAllBrowsers, configureAgentBrowser, findChrome } from "./browser/agent-browser.js";
 export { closeAllOob, oobState, resumeOob, PUBLIC_OOB_SERVERS, isPublicServer, findInteractsh } from "./oob.js";
+export { reapOrphanListeners, spawnTied } from "./tied.js";
 export { recordEvent, runSummary, type RunSummary } from "./metrics.js";
 export { detect, type Detection, type SensitiveType } from "./privacy/detectors.js";
 export { meterEgress, privacyReport, setCanaries, canaries, resetPrivacyMeter, type Canary, type EgressChannel, type PrivacyReport } from "./privacy/meter.js";

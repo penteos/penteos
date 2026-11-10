@@ -96,7 +96,34 @@ function targetPort(target: Target): number | undefined {
  * `include` must cover the whole target; `exclude` applies on any overlap. Scanning a /24 that
  * contains one excluded host is a violation, even if the other 253 are in scope.
  */
-function matches(rule: ScopeRule, target: Target, context: string, mode: "covers" | "overlaps"): boolean {
+/** The host and port a URL rule names, when its host is a name (https://app.example.com/x). */
+function urlRuleHost(rule: ScopeRule): { host: string; port: number; wholeOrigin: boolean } | undefined {
+  if (rule.target.type !== "url") return undefined;
+  try {
+    const t = parseTarget(rule.target.value);
+    if (t.type !== "url" || t.hostIsIp) return undefined;
+    return { host: t.host, port: t.port, wholeOrigin: t.path === "/" };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A name (no URL) against a URL rule. A passive action (DNS lookups, subdomain discovery from
+ * public sources) touches no port or path of the target: the host being in scope is enough. Any
+ * other action is held to the rule's port and to the whole origin, like a host rule on that port:
+ * app.example.com:443 is covered by https://app.example.com, a bare app.example.com (any port) is not.
+ */
+function nameAgainstUrlRule(rule: ScopeRule, target: Extract<Target, { type: "domain" }>, mode: "covers" | "overlaps", passive: boolean): boolean {
+  const u = urlRuleHost(rule);
+  if (!u || u.host !== target.fqdn) return false;
+  // An exclusion of one path does not exclude the host; an exclusion of the whole origin does.
+  if (mode === "overlaps") return u.wholeOrigin && (target.port === undefined || target.port === u.port);
+  if (passive) return true;
+  return u.wholeOrigin && target.port === u.port;
+}
+
+function matches(rule: ScopeRule, target: Target, context: string, mode: "covers" | "overlaps", passive = false): boolean {
   if (rule.networkContext !== undefined && rule.networkContext !== context) return false;
   if (rule.target.type === "entity") return false; // needs the graph; resolved by the caller in v1
 
@@ -106,6 +133,7 @@ function matches(rule: ScopeRule, target: Target, context: string, mode: "covers
   if (target.type === "address" && range) {
     hit = mode === "covers" ? rangeContains(range, target.range) : rangesOverlap(range, target.range);
   } else if (target.type === "domain") {
+    if (rule.target.type === "url") return nameAgainstUrlRule(rule, target, mode, passive);
     hit = hostMatchesName(rule, target.fqdn);
   } else if (target.type === "url") {
     if (rule.target.type === "url") {
@@ -122,8 +150,9 @@ function matches(rule: ScopeRule, target: Target, context: string, mode: "covers
 
   if (rule.ports !== undefined) {
     const port = targetPort(target);
-    // Unknown port: the action may touch any port. It overlaps an exclude, but is not covered by an include.
-    if (port === undefined) return mode === "overlaps";
+    // Unknown port: the action may touch any port. It overlaps an exclude, but is not covered by an
+    // include, unless it is passive (a lookup reaches no port of the target at all).
+    if (port === undefined) return mode === "overlaps" || passive;
     return portAllowed(rule.ports, port);
   }
   return true;
@@ -207,8 +236,17 @@ export function evaluateScope(engagement: Engagement, rules: ScopeRule[], query:
   }
 
   // 3. Default deny: some inclusion must cover the target.
-  const includes = rules.filter((r) => r.effect === "include" && matches(r, target, context, "covers"));
+  const passive = query.risk === "passive";
+  const includes = rules.filter((r) => r.effect === "include" && matches(r, target, context, "covers", passive));
   if (includes.length === 0) {
+    // The name is in scope only as a web application: say how to write the target.
+    if (target.type === "domain") {
+      const asUrl = rules.find((r) => r.effect === "include" && urlRuleHost(r)?.host === target.fqdn && (r.networkContext === undefined || r.networkContext === context));
+      if (asUrl) {
+        const u = urlRuleHost(asUrl)!;
+        return { decision: "deny", code: "OUT_OF_SCOPE", ruleId: asUrl.id, reason: `${query.target} is in scope only as the web application ${asUrl.target.type === "url" ? asUrl.target.value : ""}, and this target names ${target.port === undefined ? "no port (it could touch any)" : `port ${target.port}`}. Use the URL, or ${target.fqdn}:${u.port}. Passive lookups of the name (DNS, subdomains) are allowed as they are.` };
+      }
+    }
     // The host is in scope, but only on some ports, and the target names none: say so, with the fix.
     const onPorts = rules.find((r) => r.effect === "include" && r.ports !== undefined && targetPort(target) === undefined && matches({ ...r, ports: undefined }, target, context, "covers"));
     if (onPorts) {

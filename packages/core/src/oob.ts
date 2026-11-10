@@ -1,5 +1,6 @@
 import { activeToolbox } from "./tools/toolbox.js";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawnTied } from "./tied.js";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -108,7 +109,7 @@ class Listener {
     const domainRe = new RegExp(`\\b([a-z0-9]{20,}\\.${server})\\b`, "i");
 
     this.ready = new Promise<string>((resolve, reject) => {
-      const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+      const child = spawnTied(bin, args);
       this.child = child;
       let settled = false;
       const timer = setTimeout(() => {

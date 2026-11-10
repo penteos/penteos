@@ -164,10 +164,10 @@ defineOperation({
 defineOperation({
   name: "finding.update",
   title: "Edit finding",
-  description: "Edits the text of a finding (title, severity, description, impact, remediation, steps to reproduce, CWE, CVSS, references) or adds evidence.",
+  description: "Edits the text of a finding (title, severity, description, impact, remediation, steps to reproduce, CWE, CVSS, references), adds evidence, or takes off evidence attached by mistake (removeEvidenceIds: it stays in the project and the audit log, only no longer backs this finding; at least one must remain).",
   kind: "write",
   actors: ["human", "agent"],
-  input: z.object({ engagementId, id: z.string(), title: z.string().min(1).optional(), severity: Severity.optional(), addEvidenceIds: z.array(z.string()).optional(), ...FindingText }),
+  input: z.object({ engagementId, id: z.string(), title: z.string().min(1).optional(), severity: Severity.optional(), addEvidenceIds: z.array(z.string()).optional(), removeEvidenceIds: z.array(z.string()).optional(), ...FindingText }),
   handler: (input, ctx) => {
     const e = ctx.engagement(input.engagementId);
     const finding = e.get(input.id);
@@ -175,9 +175,17 @@ defineOperation({
     if (ctx.caller.actor.type === "agent" && !["draft", "in_review"].includes(String(finding.attributes.status))) {
       throw new OperationError("PERMISSION_DENIED", "agents can only edit findings in draft or in review");
     }
-    const { engagementId: _e, id: _id, addEvidenceIds, ...fields } = input;
+    const { engagementId: _e, id: _id, addEvidenceIds, removeEvidenceIds, ...fields } = input;
     const changes: Record<string, unknown> = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
-    if (addEvidenceIds?.length) changes.evidenceIds = [...new Set([...((finding.attributes.evidenceIds as string[]) ?? []), ...addEvidenceIds])];
+    const current = (finding.attributes.evidenceIds as string[]) ?? [];
+    if (addEvidenceIds?.length || removeEvidenceIds?.length) {
+      const unknown = (removeEvidenceIds ?? []).filter((id) => !current.includes(id));
+      if (unknown.length) throw new OperationError("VALIDATION_ERROR", `not evidence of this finding: ${unknown.join(", ")}`);
+      const next = [...new Set([...current, ...(addEvidenceIds ?? [])])].filter((id) => !(removeEvidenceIds ?? []).includes(id));
+      // No proof, no finding: what remains has to show it.
+      if (next.length === 0 && current.length > 0) throw new OperationError("VALIDATION_ERROR", "a finding keeps at least one piece of evidence: add the right one in the same call (addEvidenceIds) before taking the wrong one off");
+      changes.evidenceIds = next;
+    }
     const edited = e.editEntity(input.id, changes, ctx.caller.actor);
     // Raised to high, or now recognised as an exposure: its impact questions open.
     return openDeepening(e, input.id, ctx.caller.actor) ? e.get(input.id)! : edited;

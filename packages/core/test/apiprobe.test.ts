@@ -106,8 +106,9 @@ it("approving a probe runs the whole probe, not just its first request", async (
   expect(asked.status).toBe("pending_approval");
   expect(hits).toBe(0);
   await runner.resolveApproval(asked.approvalId, true, { type: "human", id: "01JA000000000000000000HUMN" });
-  await new Promise((r) => setTimeout(r, 300));
-  expect(hits).toBe(6);
+  await new Promise((r) => setTimeout(r, 500));
+  // Asked for 6; at least 15 are sent (limits commonly start between 10 and 20).
+  expect(hits).toBe(15);
   expect(eng.query({ kind: "observation", limit: 50 }).some((o) => String(o.attributes.sourceRule) === "ratelimit:none")).toBe(true);
 });
 
@@ -120,8 +121,8 @@ it("tests several endpoints in one call and gives each a verdict", async () => {
   )) as { verdict: string; results: Array<{ request: string; verdict: string; attempts: number }>; note: string };
   expect(r.verdict).toBe("no_defence");
   expect(r.results.map((x) => [x.request, x.verdict, x.attempts])).toEqual([
-    ["POST /api/auth/login", "no_defence", 4],
-    ["POST /api/auth/forgot-password", "no_defence", 4],
+    ["POST /api/auth/login", "no_defence", 15],
+    ["POST /api/auth/forgot-password", "no_defence", 15],
   ]);
   expect(r.note).toMatch(/conclusive/);
 });
@@ -135,7 +136,7 @@ it("a route that does not exist is not reported as lacking a limit", async () =>
   )) as { verdict: string; results: Array<{ request: string; verdict: string; attempts: number }>; note: string };
   expect(r.results.map((x) => [x.request, x.verdict, x.attempts])).toEqual([
     ["POST /api/account/forgot-password", "missing", 1],
-    ["POST /api/auth/login", "no_defence", 4],
+    ["POST /api/auth/login", "no_defence", 15],
   ]);
   expect(r.verdict).toBe("mixed");
   expect(r.note).toMatch(/do not exist.*forgot-password/);

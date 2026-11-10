@@ -17,16 +17,29 @@ interface Evidence extends Entity {
   excerpt: string;
 }
 
-function EvidenceItem(props: { id: string }) {
+function EvidenceItem(props: { id: string; findingId?: string; removable?: boolean }) {
   const { client } = useApp();
   const [ev, setEv] = useState<Evidence>();
   useEffect(() => {
     client.call<Evidence>("evidence.get", { id: props.id }).then(setEv, () => {});
   }, [client, props.id]);
   if (!ev) return null;
+  // Taken off this finding only: it stays in the project and in the audit log.
+  const remove = () =>
+    void client.call("finding.update", { id: props.findingId, removeEvidenceIds: [props.id] }).then(
+      () => toast("ok", t("work.detail.evidenceRemoved")),
+      (e: Error) => toast("bad", t("work.detail.evidenceRemoveFailed"), e.message),
+    );
   return (
     <div className="evidence">
-      <div className="cap">{String(ev.attributes.caption)}</div>
+      <div className="cap evidence-cap">
+        <span>{String(ev.attributes.caption)}</span>
+        {props.removable && props.findingId ? (
+          <button className="btn sm ghost" title={t("work.detail.evidenceRemoveHint")} onClick={remove}>
+            {t("work.detail.evidenceRemove")}
+          </button>
+        ) : null}
+      </div>
       <pre className="mono">{ev.excerpt || t("work.detail.evidenceEmpty")}</pre>
     </div>
   );
@@ -189,7 +202,7 @@ export function FindingDetailPanel(props: { params: { id: string } }) {
           {((a.evidenceIds as string[]) ?? []).length === 0 ? (
             <span className="muted">{t("work.detail.noEvidence")}</span>
           ) : (
-            (a.evidenceIds as string[]).map((id) => <EvidenceItem key={id} id={id} />)
+            (a.evidenceIds as string[]).map((id) => <EvidenceItem key={id} id={id} findingId={f!.id} removable={(a.evidenceIds as string[]).length > 1} />)
           )}
         </div>
 

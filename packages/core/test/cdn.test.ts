@@ -71,3 +71,27 @@ it("lets the same agent scan the client's own server, and the operator scan anyt
     }
   }
 });
+
+it("refuses an agent's sweep of every nuclei template behind the CDN; a chosen check goes on", async () => {
+  const sweep = await runner.runExec({ argv: ["nuclei", "-silent", "-u", "https://www.cliente.test"], targets: ["https://www.cliente.test"], risk: "active" }, MAESTRO);
+  expect(sweep).toMatchObject({ status: "denied", code: "CDN_TARGET" });
+  expect((sweep as { reason: string }).reason).toMatch(/Cloudflare.*-tags/s);
+  // Templates chosen: past this rule (where nuclei is installed it starts against a .test name, which never resolves, and is stopped at once).
+  const stop = async (r: unknown) => {
+    const run = (r as { run?: { id: string } }).run;
+    if (run) {
+      runner.cancel(run.id);
+      await runner.waitForRun(run.id, 10);
+    }
+  };
+  const chosen = await runner.runExec({ argv: ["nuclei", "-silent", "-u", "https://www.cliente.test", "-tags", "nextjs"], targets: ["https://www.cliente.test"], risk: "active" }, MAESTRO);
+  expect((chosen as { code?: string }).code).not.toBe("CDN_TARGET");
+  await stop(chosen);
+  // The client's own server, and the operator by hand: not this rule's business.
+  const own = await runner.runExec({ argv: ["nuclei", "-silent", "-u", "https://mail.cliente.test"], targets: ["https://mail.cliente.test"], risk: "active" }, MAESTRO);
+  expect((own as { code?: string }).code).not.toBe("CDN_TARGET");
+  await stop(own);
+  const human = await runner.runExec({ argv: ["nuclei", "-silent", "-u", "https://www.cliente.test"], targets: ["https://www.cliente.test"], risk: "active" }, HUMAN);
+  expect((human as { code?: string }).code).not.toBe("CDN_TARGET");
+  await stop(human);
+});

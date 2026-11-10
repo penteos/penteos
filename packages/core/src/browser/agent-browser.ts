@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawnTied } from "../tied.js";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -150,7 +151,7 @@ class EngagementBrowser {
         detached: process.platform !== "win32",
         env: { ...env, PENTEOS_AGENT_PROXY_USER: `${this.engagementId}+${AGENT_BROWSER_SOURCE}`, PENTEOS_AGENT_PROXY_PASS: proxy.token },
       });
-    } else this.process = spawn(
+    } else this.process = spawnTied(
       chrome!,
       [
         "--headless=new",
@@ -182,7 +183,7 @@ class EngagementBrowser {
         "--window-size=1366,900",
         "about:blank",
       ],
-      { stdio: "ignore", detached: process.platform !== "win32" },
+      { output: "ignore" },
     );
     this.process.once("exit", () => this.shutdown());
     const endpoint = await this.devtoolsEndpoint();

@@ -38,6 +38,7 @@ import {
   closeAllBrowsers,
   configureAgentBrowser,
   closeAllOob,
+  reapOrphanListeners,
   resumeOob,
   meterEgress,
   interceptionHooks,
@@ -747,6 +748,10 @@ function onListening() {
   process.stdout.write(`PENTEOS_READY ${JSON.stringify(teamMode ? { port, teamMode, dataDir } : { port, token: humanToken, agentToken, dataDir })}\n`);
   // The start got this far: it counts as good, so the safe-mode countdown starts over.
   plugins.bootCompleted();
+  // Listeners a previous core left running when it died (before they were tied to it): stop them
+  // before re-opening the ones that should be on.
+  const reaped = reapOrphanListeners(reachable().map((e) => workspace.dirOf(e.id)));
+  if (reaped.length) process.stderr.write(`stopped ${reaped.length} interaction listener(s) left by a previous run\n`);
   // Re-open the OOB listeners of engagements that had it on (their domain is kept across restarts).
   void resumeOob(reachable().filter((e) => !["closed", "archived"].includes(e.status)).map((e) => workspace.get(e.id)));
 }

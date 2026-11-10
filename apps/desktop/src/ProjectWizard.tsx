@@ -263,6 +263,21 @@ export function ProjectWizard(props: { firstRun: boolean; onClose: () => void })
     if (!autonomyTouched) setAutonomy(suggested);
     setStep("ai");
   };
+  /**
+   * A URL typed as the client or the project name ("https://app.acme.com/login") becomes the site's
+   * name (app.acme.com), and when the scope is still empty it is what the person meant to test.
+   */
+  const fromUrl = (value: string): string => {
+    const v = value.trim();
+    if (!/^[a-z][a-z0-9+.-]*:\/\/\S+$/i.test(v)) return value;
+    try {
+      const u = new URL(v);
+      if (!scope.trim() && /^https?:$/.test(u.protocol)) setScope(u.origin);
+      return u.hostname.replace(/^www\./, "");
+    } catch {
+      return value;
+    }
+  };
   const valid = Boolean(clientName.trim() && name.trim());
   const info = MODES[mode];
 
@@ -314,8 +329,8 @@ export function ProjectWizard(props: { firstRun: boolean; onClose: () => void })
               <>
                 <h2>{t("start.wizard.details.title")}</h2>
                 <div className="row2">
-                  <label>{t("start.wizard.details.client")}<input className="input" autoFocus value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder={t("start.wizard.details.clientPlaceholder")} /></label>
-                  <label>{t("start.wizard.details.name")}<input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("start.wizard.details.namePlaceholder.default")} /></label>
+                  <label>{t("start.wizard.details.client")}<input className="input" autoFocus value={clientName} onChange={(e) => setClientName(e.target.value)} onBlur={() => setClientName(fromUrl(clientName))} placeholder={t("start.wizard.details.clientPlaceholder")} /></label>
+                  <label>{t("start.wizard.details.name")}<input className="input" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => setName(fromUrl(name))} placeholder={t("start.wizard.details.namePlaceholder.default")} /></label>
                 </div>
                 {!teamMode && window.penteosDesktop?.projectDir && (saveDir ?? root) ? (
                   <div className="save-location">

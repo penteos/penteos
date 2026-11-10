@@ -371,6 +371,8 @@ textarea.input { height: auto; padding: 7px 8px; resize: vertical; line-height: 
 .workflow { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
 .evidence { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
 .evidence .cap { padding: 6px 10px; background: var(--bg-2); color: var(--fg-1); border-bottom: 1px solid var(--line); font-size: 12px; }
+.evidence .evidence-cap { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.evidence .evidence-cap .btn { flex: none; }
 .evidence pre { margin: 0; padding: 8px 10px; white-space: pre-wrap; word-break: break-all; color: var(--fg-1); max-height: 260px; overflow: auto; }
 .report { max-width: 920px; margin: 0 auto; padding: 24px 28px 40px; display: flex; flex-direction: column; gap: 24px; }
 .report h2 { margin: 0 0 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .7px; color: var(--fg-3); }

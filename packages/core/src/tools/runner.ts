@@ -1,6 +1,7 @@
 import ipaddr from "ipaddr.js";
 import { cdnOf } from "../cdn.js";
 import { type ChildProcess, spawn } from "node:child_process";
+import { spawnTied } from "../tied.js";
 import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { parseNmapXml } from "@penteos/parser-nmap";
@@ -13,7 +14,7 @@ import { formatRequest, formatResponse, type HttpResponse, paramsOf, parseRawReq
 import { harvestScript, type JsHarvest, mergeHarvests, scriptUrls } from "../webjs.js";
 import { offlineSandbox } from "../sandbox.js";
 import { parseApiSpec, samplePath } from "../apispec.js";
-import { INGEST_FORMAT } from "@penteos/schema";
+import { INGEST_FORMAT, naturalKeyFor } from "@penteos/schema";
 import WebSocket from "ws";
 import {
   type AttackType,
@@ -33,7 +34,7 @@ import { parseTarget } from "../scope/target.js";
 import { findTargetTokens, undeclaredTargets } from "./targets.js";
 import { detectWildcards, dropWildcardNames } from "../dnswild.js";
 import { browse, browserOpen, type BrowseAction, type BrowseResult } from "../browser/agent-browser.js";
-import { manifestInvocation, manifestTargets, parseWithManifest, type ToolManifest, validateManifest, withDefaults, withOutputArgs } from "./manifest.js";
+import { argsForTool, manifestInvocation, manifestTargets, targetForTool, parseWithManifest, type ToolManifest, validateManifest, withDefaults, withOutputArgs } from "./manifest.js";
 import { installCommand, ToolRegistry } from "./registry.js";
 import { mb, runForIdentity, ToolboxError } from "./toolbox.js";
 import { AUTO_INSTALL_DEFAULT, type AutoInstall, CAPABILITIES, type CapabilityId, type Gap, listGaps, openGap, PHASE_CAPABILITIES, updateGap } from "./capabilities.js";
@@ -107,12 +108,26 @@ export interface Approval {
 }
 
 const MISSING_ROUTE = new Set([404, 405, 410, 501]);
+/** nuclei flags that choose which templates run: with none of them, it is a sweep of all of them. */
+const NUCLEI_SELECTORS = new Set(["-t", "-templates", "-tags", "-id", "-s", "-severity", "-w", "-workflows", "-pt", "-type", "-tc", "-template-condition", "-a", "-author", "-nt", "-new-templates"]);
 
 const STATIC_EXT = /\.(css|js|mjs|map|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|pdf|zip|gz)(\?|$)/i;
 const STATIC_DIR = /\/(?:wp-content\/uploads|assets|static|_next\/static|dist|build|fonts|images?|img|css|js)\//i;
 /** A public static file (stylesheet, script, image, font…), not an endpoint worth flagging as no-auth. */
 function isStaticAsset(path: string): boolean {
   return STATIC_EXT.test(path) || STATIC_DIR.test(path);
+}
+
+/** Files every site publishes for anyone: crawlers, security contacts, app manifests. */
+const PUBLIC_FILES = /^\/(?:robots\.txt|sitemap[^/]*\.xml|humans\.txt|ads\.txt|security\.txt|favicon\.ico|manifest\.(?:json|webmanifest)|site\.webmanifest|browserconfig\.xml|\.well-known\/.*)$/i;
+/** Pages that exist to be reached without a session: signing in or up, and the legal pages. */
+const PUBLIC_PAGES = /^(?:\/[a-z]{2}(?:-[a-z]{2})?)?\/(?:log-?in|sign-?in|sign-?up|register|registro|ingresar|iniciar-sesion|forgot-password|reset-password|recuperar[^/]*|auth\/(?:login|signin|register))\/?$|(?:terms|terminos|privacy|privacidad|politica|cookies|legal|aviso-legal|condiciones)[^/]*(?:\.html?)?$/i;
+/** Public by design: answering without credentials is the point, not a gap. */
+export function isPublicByDesign(path: string): boolean {
+  const p = path.split("?")[0]!;
+  // Under an API prefix a name like "cookies" or "terms" is data, not a page.
+  if (/^\/(?:api|graphql|rest|v\d+)(?:\/|$)/i.test(p)) return false;
+  return PUBLIC_FILES.test(p) || PUBLIC_PAGES.test(p);
 }
 
 export interface EnumerationInput {
@@ -714,6 +729,7 @@ export class ToolRunner {
         } as never,
         caller.actor,
       );
+      if (response.status === 429 || response.status === 423) this.noteDefence(url.origin, url.pathname, `${req.method} ${url.pathname} answered ${response.status}`, caller.actor);
       const done = this.engagement.finishRun(run.id, { status: "finished", rawIds: [rawId], summary: { http: { status: response.status, size: response.size, timeMs: response.timeMs }, ingested } });
       this.engagement.noteReachability(url.hostname, true);
       return { status: "http", run: done, response, rawId };
@@ -953,8 +969,9 @@ export class ToolRunner {
       const refusing = mode === 401 || mode === 403;
       // A route the contract declares public is meant to answer: not a gap.
       // A static asset (a stylesheet, script, image, font…) answering without auth is public by
-      // design, not an exposure: it would only flood the results.
-      const open = results.filter((r) => r?.noAuth !== undefined && r.noAuth >= 200 && r.noAuth < 300 && declared.get(r.path) !== false && !isStaticAsset(r.path) && (refusing || r.noAuth !== mode || declared.get(r.path) === true));
+      // design, not an exposure: it would only flood the results. So are robots.txt, the sign-in
+      // and sign-up pages and the legal pages.
+      const open = results.filter((r) => r?.noAuth !== undefined && r.noAuth >= 200 && r.noAuth < 300 && declared.get(r.path) !== false && !isStaticAsset(r.path) && !isPublicByDesign(r.path) && (refusing || r.noAuth !== mode || declared.get(r.path) === true));
       const items: unknown[] = [];
       for (const r of results.filter(Boolean)) {
         if (r?.noAuth !== undefined) items.push({ op: "upsert", kind: "endpoint", key: { origin: base.origin, path: r.path.split("?")[0] }, attributes: { statusesSeen: [r.noAuth] }, confidence: 0.8 });
@@ -1096,6 +1113,29 @@ export class ToolRunner {
   // -------------------------------------------------------------------------------------------
 
   /**
+   * A defence seen on an endpoint (a 429 or 423 from any request: the rate-limit probe, a fuzz, a
+   * single request) settles an earlier "no rate limiting" there, which was measured with too few
+   * attempts. Unreviewed ones become false positives with the reason; one already behind a finding
+   * keeps its place and gets the note, and the finding is the one to correct.
+   */
+  private noteDefence(origin: string, path: string, how: string, by: Actor): void {
+    try {
+      const endpoint = this.engagement.findByKey("endpoint", naturalKeyFor("endpoint", { origin, path }));
+      if (!endpoint) return;
+      const stale = this.engagement
+        .query({ kind: "observation", limit: 5000 })
+        .filter((o) => o.attributes.sourceRule === "ratelimit:none" && (o.attributes.affects as Array<{ id: string }>).some((a) => a.id === endpoint.id) && !String(o.attributes.triageReason ?? "").startsWith("A later request"));
+      for (const o of stale) {
+        const reason = `A later request met the limit: ${how}. The earlier test stopped before reaching it.`;
+        const linked = Boolean(o.attributes.findingId);
+        this.engagement.editEntity(o.id, linked || (o.attributes.triage ?? "new") !== "new" ? { triageReason: reason } : { triage: "false_positive", triageReason: reason }, by);
+      }
+    } catch {
+      /* a note, never a reason for the run to fail */
+    }
+  }
+
+  /**
    * Sends the same request (a login, a password reset, an OTP check) a bounded number of times and
    * looks for any defence: a 429 or 423, a lockout or captcha message, an answer that changes, or a
    * delay that grows. Stops at the first sign of one. None after all the attempts is an observation
@@ -1104,7 +1144,8 @@ export class ToolRunner {
    * Intrusive by default: repeated logins can lock a real account.
    */
   async probeRateLimit(input: { origin: string; raw: string; more?: string[]; attempts?: number; risk: RiskLevel }, caller: ToolCaller, approvedBy?: Actor): Promise<RunOutcome> {
-    const attempts = Math.min(Math.max(input.attempts ?? 12, 3), 40);
+    // Limits commonly start between 10 and 20 attempts: fewer can only say "none seen yet".
+    const attempts = Math.min(Math.max(input.attempts ?? 20, 15), 40);
     const raws = [input.raw, ...(input.more ?? [])].slice(0, 5);
     const resolved = this.engagement.resolveSecrets(raws);
     if (resolved.missing.length) throw new Error(`Unknown secret(s): ${resolved.missing.join(", ")}. Save them first with secret_save.`);
@@ -1159,6 +1200,7 @@ export class ToolRunner {
           ...(defence ? { defence } : {}),
         };
         results.push(result);
+        if (defence && /^HTTP 42[39]|lockout/.test(defence)) this.noteDefence(u.origin, path, `${req.method} ${path}: ${defence}`, caller.actor);
         if (!missing) items.push({ op: "upsert", kind: "endpoint", key: { origin: u.origin, path }, attributes: { methods: [req.method], statusesSeen: statuses }, confidence: 0.9 });
         if (result.verdict === "no_defence") {
           items.push({ op: "observe", title: `No rate limiting on ${req.method} ${path}: ${tries.length} attempts accepted`, sourceRule: "ratelimit:none", affects: [{ kind: "endpoint", key: { origin: u.origin, path } }], severityHint: "medium", detail: `${tries.length} identical requests answered ${statuses.join("/")} in ${result.timeMs[0]}-${result.timeMs[1]} ms, with no 429, lockout, captcha or growing delay. Online guessing of passwords or codes is not slowed down.` });
@@ -1676,6 +1718,7 @@ export class ToolRunner {
     let done = 0;
     let anomalies = 0;
     let lastEmit = 0;
+    let limited = false;
     const pending: FuzzResult[] = [];
     const flush = () => {
       if (pending.length) this.engagement.addFuzzResults(run.id, pending.splice(0));
@@ -1701,6 +1744,10 @@ export class ToolRunner {
           return { ...base, error: "out of scope: not sent", anomalies: ["error"] };
         }
         const res = await sendHttp(url, req, 30_000);
+        if ((res.status === 429 || res.status === 423) && !limited) {
+          limited = true;
+          this.noteDefence(url.origin, url.pathname, `a fuzz of ${req.method} ${url.pathname} was answered ${res.status} at request ${index + 1}`, run.actor);
+        }
         const m = measure(res.body);
         const matches = grep.filter((g) => g.test(res.body)).map((g) => g.name);
         const captured = extract ? extract.exec(res.body) : null;
@@ -1770,13 +1817,20 @@ export class ToolRunner {
   // -------------------------------------------------------------------------------------------
 
   async runExec(input: { argv: string[]; targets: string[]; risk: RiskLevel }, caller: ToolCaller, approvedBy?: Actor): Promise<RunOutcome> {
-    const [tool, ...rawArgs] = input.argv;
+    const [tool, ...rawArgs0] = input.argv;
     if (!tool) throw new Error("empty command");
 
     // A tool Penteos knows (built-in or added manifest): its own target rules, risk floor,
     // verified binary and output mapping apply.
     const manifest = this.registry.forBinary(tool);
-    if (manifest?.name === "nmap") return this.runNmap(rawArgs, caller, approvedBy);
+    if (manifest?.name === "nmap") return this.runNmap(rawArgs0, caller, approvedBy);
+    let rawArgs = rawArgs0;
+    if (manifest) {
+      // A name tool (dnsx, subfinder, dig) given a URL gets its host, before anything is checked:
+      // the scope decision below is about what the command will really reach.
+      rawArgs = argsForTool(manifest, rawArgs0);
+      input = { ...input, argv: [tool, ...rawArgs], targets: input.targets.map((t) => targetForTool(manifest, t)) };
+    }
     let args = rawArgs;
     let binary = tool;
     if (manifest) {
@@ -1790,6 +1844,21 @@ export class ToolRunner {
         targets: [...new Set([...input.targets, ...found.targets])],
         risk: riskExceeds(manifest.risk, input.risk) ? manifest.risk : input.risk,
       };
+      // An agent sweeping every template against names that only resolve to a CDN measures the CDN's
+      // WAF and rate limit: hours of 429s and a "WAF detected". Same rule as nmap on a CDN.
+      if (manifest?.name === "nuclei" && caller.actor.type === "agent" && !approvedBy && !rawArgs.some((a) => NUCLEI_SELECTORS.has(a.split("=")[0]!))) {
+        const hosts = [...new Set(input.targets.map((t) => { try { return /^[a-z]+:\/\//i.test(t) ? new URL(t).hostname : t; } catch { return t; } }))];
+        const cdn = this.cdnTargets(hosts);
+        if (cdn.length && cdn.length === hosts.length) {
+          return this.deny(caller, tool, rawArgs, input.targets, input.risk, {
+            decision: "deny",
+            code: "CDN_TARGET",
+            reason:
+              `${cdn.map((c) => `${c.target} (${c.provider})`).join(", ")} only resolve to CDN edge addresses: a sweep of every nuclei template there mostly measures ${cdn[0]!.provider}'s WAF and rate limit (429s for hours). ` +
+              "Choose what to check: specific templates (-t, -id), tags for the stack you identified (-tags nextjs,cloudflare…), or -s critical,high, at -rl 5 or less; for one known CVE use vuln_confirm. Tell the operator if a full sweep is really wanted.",
+          } as never);
+        }
+      }
       const status = await this.registry.binaryFor(manifest);
       if (!status.installed) {
         const how = installCommand(manifest);
@@ -2681,8 +2750,9 @@ export class ToolRunner {
     const chunks: Buffer[] = [];
     // Secrets are substituted here, for the process only: the run keeps {{secret:name}}.
     // Its own process group, so cancelling also stops what the tool launched (scripts, helpers):
-    // otherwise a child keeps the output open and the run never ends.
-    const child = spawn(command, this.engagement.resolveSecrets(args).argv, { cwd: this.workDir(), env: cleanEnv(this.registry.toolbox?.binDir, this.registry.toolbox?.env()), stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    // otherwise a child keeps the output open and the run never ends. Tied to the core: if the
+    // core dies, the tool stops too instead of going on against the target (tied.ts).
+    const child = spawnTied(command, this.engagement.resolveSecrets(args).argv, { cwd: this.workDir(), env: cleanEnv(this.registry.toolbox?.binDir, this.registry.toolbox?.env()) });
     this.processes.set(run.id, child);
     this.live.set(run.id, "");
     const onData = (data: Buffer) => {
@@ -2693,8 +2763,8 @@ export class ToolRunner {
       // `offset` lets a client that fetched the buffer meanwhile skip what it already has.
       this.engagement.events.emit("change", { type: "run.output", id: run.id, chunk, offset: before.length });
     };
-    child.stdout.on("data", onData);
-    child.stderr.on("data", onData);
+    child.stdout?.on("data", onData);
+    child.stderr?.on("data", onData);
 
     let finished = false;
     const finish = (exitCode: number | null, error?: Error) => {

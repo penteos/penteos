@@ -4,6 +4,27 @@ All notable changes to Penteos are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-11-10
+
+- **A web application in scope covers its name.** With `https://app.example.com` in scope,
+  passive lookups of `app.example.com` (DNS, subdomains from public sources) are allowed; anything
+  active is held to the application's port, and a refusal says how to write the target. DNS and
+  subdomain tools given a URL get its host, and the scope is checked on what the command will
+  really reach.
+- **Nothing outlives the core.** Tools, the interaction listener and the agents' headless browser
+  stop when the core stops, even when it is killed outright or crashes: a scan no longer goes on
+  against the target with nobody able to stop it. Listeners left running by an earlier version
+  are stopped at start.
+- **Fewer wrong observations.** The rate-limit test sends at least 15 attempts (limits commonly
+  start between 10 and 20); a 429 seen later on the same endpoint, from any request, settles an
+  earlier "no rate limiting". `robots.txt`, sign-in and sign-up pages and legal pages are no
+  longer reported as answering without authentication.
+- **Evidence attached by mistake** can be taken off a finding; at least one piece always stays.
+- **Behind a CDN**, an agent's sweep of every nuclei template is refused with what to check
+  instead (chosen templates, tags or severities); the operator can still run it by hand.
+- **New project:** a URL typed as the client or the project name becomes the site's name, and
+  fills the scope when it is empty.
+
 ## [0.1.2] - 2026-11-10
 
 - **New project with plugins installed.** The last step of the new project wizard no longer

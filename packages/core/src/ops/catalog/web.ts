@@ -116,7 +116,7 @@ defineOperation({
   name: "web.probe_rate_limit",
   title: "Test rate limiting",
   description:
-    "Sends the same request (a login, a password reset, an OTP or code check) a bounded number of times and looks for a defence: 429/423, a lockout or captcha message, a changing answer or a growing delay. Stops at the first sign of one. If none appears, records an observation on the endpoint. Test every authentication endpoint of an origin in ONE call (raw plus more): one approval, one verdict per endpoint. The verdict is conclusive: never re-test it by other means. Use a test account or an invented user, never a real person's account: repeated attempts can lock it. Intrusive by default.",
+    "Sends the same request (a login, a password reset, an OTP or code check) a bounded number of times and looks for a defence: 429/423, a lockout or captcha message, a changing answer or a growing delay. Stops at the first sign of one. Sends at least 15 (limits commonly start between 10 and 20); if none appears, records an observation on the endpoint, and a 429 seen there later by any request settles it. Test every authentication endpoint of an origin in ONE call (raw plus more): one approval, one verdict per endpoint. The verdict is conclusive: never re-test it by other means. Use a test account or an invented user, never a real person's account: repeated attempts can lock it. Intrusive by default.",
   kind: "target",
   actors: ["human", "agent"],
   input: z.object({
@@ -124,7 +124,8 @@ defineOperation({
     origin: z.string().url(),
     raw: z.string().min(1).describe("The request to repeat, as in http_send (use {{secret:name}} for anything sensitive)"),
     more: z.array(z.string().min(1)).max(4).optional().describe("More requests on the same origin to test in the same call and approval (password reset, OTP or code checks)"),
-    attempts: z.number().int().min(3).max(40).default(12),
+    /** At least 15 are sent: limits commonly start between 10 and 20, and fewer would only say "none seen yet". */
+    attempts: z.number().int().min(3).max(40).default(20),
     risk: RiskLevel.default("intrusive"),
   }),
   handler: async (input, ctx) => {

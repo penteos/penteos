@@ -17,10 +17,13 @@ let runner: ToolRunner;
 let server: Server;
 let origin: string;
 let hits = 0;
+/** /late-login: no defence until the test turns it on (a limit above the first probe's attempts). */
+let limitOn = false;
 const ctx = (caller: Caller): OperationContext => ({ workspace: ws, caller, defaultEngagementId: eng.info.id, engagement: () => eng, runner: () => runner });
 
 beforeEach(async () => {
   hits = 0;
+  limitOn = false;
   dir = mkdtempSync(join(tmpdir(), "penteos-depth-"));
   ws = new Workspace(join(dir, "data"));
   eng = ws.create({ language: "es", clientName: "Lab", name: "Depth", mode: "web" }, HUMAN.actor);
@@ -28,7 +31,7 @@ beforeEach(async () => {
     req.resume();
     req.on("end", () => {
       // /open-login never defends itself; /guarded-login answers 429 from the fifth attempt.
-      if (req.url === "/guarded-login" && ++hits >= 5) {
+      if ((req.url === "/guarded-login" && ++hits >= 5) || (req.url === "/late-login" && limitOn)) {
         res.writeHead(429);
         res.end("slow down");
         return;
@@ -53,10 +56,22 @@ afterEach(async () => {
 const login = (path: string) => `POST ${path} HTTP/1.1\nContent-Type: application/json\n\n{"user":"penteos-test","password":"wrong"}`;
 
 describe("rate limiting", () => {
-  it("records an observation when every attempt is accepted", async () => {
+  it("records an observation when every attempt is accepted, after at least 15 of them", async () => {
+    // Asked for 8: limits commonly start between 10 and 20, so 8 could only say "none seen yet".
     const r = (await executeOperation("web.probe_rate_limit", { origin, raw: login("/open-login"), attempts: 8 }, ctx(MAESTRO))) as { attempts: number; defence: string | null };
-    expect(r).toMatchObject({ attempts: 8, defence: null });
+    expect(r).toMatchObject({ attempts: 15, defence: null });
     expect(eng.query({ kind: "observation", limit: 20 }).some((o) => o.attributes.sourceRule === "ratelimit:none")).toBe(true);
+  });
+
+  it("a 429 seen later on the same endpoint settles an earlier 'no rate limiting'", async () => {
+    await executeOperation("web.probe_rate_limit", { origin, raw: login("/late-login") }, ctx(MAESTRO));
+    const before = eng.query({ kind: "observation", limit: 20 }).find((o) => o.attributes.sourceRule === "ratelimit:none")!;
+    expect(before.attributes.triage).toBe("new");
+    limitOn = true;
+    await executeOperation("http.send", { origin, raw: login("/late-login") }, ctx(MAESTRO));
+    const after = eng.get(before.id)!;
+    expect(after.attributes.triage).toBe("false_positive");
+    expect(String(after.attributes.triageReason)).toContain("429");
   });
 
   it("stops at the first defence and records nothing against the endpoint", async () => {

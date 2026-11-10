@@ -365,8 +365,15 @@ for (const section of sections) {
   await sleep(500);
   await evaluate(`document.querySelector('.wizard .choice')?.click()`);
   await sleep(300);
-  const inputs = await evaluate(`(() => { const els = [...document.querySelectorAll('.wizard input.input')]; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; [["Lab", 0], ["Wizard smoke", 1]].forEach(([v, i]) => { if (els[i]) { set.call(els[i], v); els[i].dispatchEvent(new Event("input", { bubbles: true })); } }); return els.length; })()`);
+  const inputs = await evaluate(`(() => { const els = [...document.querySelectorAll('.wizard input.input')]; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; [["https://www.lab.example/login", 0], ["Wizard smoke", 1]].forEach(([v, i]) => { if (els[i]) { set.call(els[i], v); els[i].dispatchEvent(new Event("input", { bubbles: true })); } }); return els.length; })()`);
+  await sleep(100);
+  // A URL pasted as the client becomes the site's name, and the empty scope gets it.
+  await evaluate(`document.querySelectorAll('.wizard input.input')[0]?.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))`);
   await sleep(200);
+  const named = await evaluate(`({ client: document.querySelectorAll('.wizard input.input')[0]?.value, scope: document.querySelector('.wizard textarea')?.value })`);
+  const okNamed = named.client === "lab.example" && named.scope === "https://www.lab.example";
+  if (!okNamed) failed++;
+  console.log(`${okNamed ? "ok " : "FAIL"} new project: a URL as the client becomes "${named.client}", scope "${named.scope}"`);
   await evaluate(`document.querySelector('.wizard .btn.primary')?.click()`);
   await sleep(800);
   const wizardPlugins = await evaluate(`[...document.querySelectorAll('.wizard-plugin')].map((p) => p.textContent)`);
