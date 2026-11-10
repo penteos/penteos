@@ -30,7 +30,7 @@
     "@penteos/parser-bloodhound": "workspace:*",
     "@penteos/parser-nmap": "workspace:*",
     "@penteos/schema": "workspace:*",
-    "@peculiar/x509": "2.1.0",
+    "@peculiar/x509": "3.1.0",
     "ae-cvss-calculator": "1.0.13",
     "docx": "9.8.1",
     "fflate": "^0.8.3",
