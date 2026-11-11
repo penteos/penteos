@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Caller, type Engagement, executeOperation, type OperationContext, ToolRegistry, ToolRunner, Workspace } from "../src/index.js";
-import { fillTemplate, guardedRoutes, redirectsToCanary, traversalReached } from "../src/webprobes.js";
+import { allowlistBypasses, fillTemplate, guardedRoutes, redirectExamples, redirectsToCanary, traversalReached } from "../src/webprobes.js";
 
 /**
  * Open redirect, path traversal in a path parameter and a guard that only checks a cookie exists:
@@ -16,6 +16,14 @@ describe("reading the answers", () => {
     expect(redirectsToCanary(302, [["Location", "/\\penteos-redirect.invalid/"]], "", "https://a.test/login")).toBe(true);
     expect(redirectsToCanary(200, [], `<meta http-equiv="refresh" content="0;url=//penteos-redirect.invalid/">`, "https://a.test/")).toBe(true);
     expect(redirectsToCanary(302, [["Location", "/dashboard"]], "", "https://a.test/login")).toBe(false);
+  });
+
+  it("learns the redirects the app itself uses, and builds what beats a substring allowlist", () => {
+    // What OWASP Juice Shop's bundle holds, and the allowlist it checks with includes().
+    expect(redirectExamples(`<a href="./redirect?to=https://github.com/juice-shop/juice-shop">`)).toEqual([{ param: "to", value: "https://github.com/juice-shop/juice-shop" }]);
+    const bypasses = allowlistBypasses("https://github.com/juice-shop/juice-shop");
+    expect(bypasses[0]).toBe("https://penteos-redirect.invalid/?https://github.com/juice-shop/juice-shop");
+    expect(bypasses.every((b) => b.includes("penteos-redirect.invalid"))).toBe(true);
   });
 
   it("fills templates and tells a reached route from a normal answer", () => {

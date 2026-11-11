@@ -12,7 +12,7 @@ import { analyzeNmapArgs, NMAP_PRESETS } from "./nmap.js";
 import { exploitationAllowed, setPhase } from "../plan.js";
 import { formatRequest, formatResponse, type HttpResponse, paramsOf, parseRawRequest, requestUrl, sendHttp } from "../http.js";
 import { harvestScript, type JsHarvest, mergeHarvests, scriptUrls } from "../webjs.js";
-import { fillTemplate, guardedRoutes, looksSentAway, REDIRECT_CANARY, REDIRECT_PAYLOADS, redirectsToCanary, SESSION_COOKIES, traversalReached, TRAVERSAL_PAYLOADS } from "../webprobes.js";
+import { allowlistBypasses, fillTemplate, guardedRoutes, redirectExamples, looksSentAway, REDIRECT_CANARY, REDIRECT_PAYLOADS, redirectsToCanary, SESSION_COOKIES, traversalReached, TRAVERSAL_PAYLOADS } from "../webprobes.js";
 import { type DnsIssue, lookupMail, lookupName, mailIssues, TAKEOVER_SERVICES, takeoverIssue } from "../dnscheck.js";
 import { certificateIssues, CIPHERS, cookieIssues, corsIssue, headerIssues, peerCertificate, TLS_VERSION_SEVERITY, type TransportIssue, tryHandshake, WEAK_CIPHER_SEVERITY } from "../transport.js";
 import { type DeepSignals, deepSignals, jsReferences, mergeSignals, recoverSources, safeSourcePath, sourceMapUrl } from "../webjs-deep.js";
@@ -112,6 +112,10 @@ export interface Approval {
 }
 
 const MISSING_ROUTE = new Set([404, 405, 410, 501]);
+/** Routes that are never meant for anyone: debugging, administration, internals, dumps. */
+const SENSITIVE_ROUTE = /(^|\/)(_?debug|admin|internal|actuator|env|config(uration)?|dump|backup|metrics|console|_?private|manage(ment)?|phpinfo|heapdump|trace)(\/|\.|$|\?)/i;
+/** An answer carrying credentials: password or secret fields with a value. */
+const SECRET_FIELDS = /["'](pass(word|wd)?|secret|api_?key|private_?key|access_?token|refresh_?token)["']\s*:\s*["'][^"']{3,}/i;
 
 /**
  * A server error is a lead, never a dead end: a 500 or 504 often means the input reached code that
@@ -891,6 +895,8 @@ export class ToolRunner {
       const seen = new Set<string>();
       const harvests: JsHarvest[] = [];
       const signals: DeepSignals[] = [];
+      // Redirect values the app itself uses: what its allowlist accepts, the base of the bypasses.
+      const examples: Array<{ param: string; value: string }> = html ? redirectExamples(html) : [];
       const read: string[] = [];
       const maps: string[] = [];
       let bytes = 0;
@@ -910,6 +916,7 @@ export class ToolRunner {
         save(rel, got.body);
         harvests.push(harvestScript(got.body));
         signals.push(deepSignals(got.body, rel));
+        if (examples.length < 60) examples.push(...redirectExamples(got.body));
         for (const next of jsReferences(got.body, u.href)) if (!seen.has(next)) queue.push(new URL(next));
         const map = sourceMapUrl(got.body, got.headers, u.href) ?? `${u.href.split("?")[0]}.map`;
         if (!maps.includes(map)) maps.push(map);
@@ -1002,9 +1009,9 @@ export class ToolRunner {
       if (deep.sinks.length) items.push({ op: "observe", title: `DOM sinks in the application's code: ${[...new Set(deep.sinks.map((x) => x.kind))].join(", ")}`, sourceRule: "webjs:sinks", affects: app, severityHint: "info", detail: deep.sinks.slice(0, 20).map((x) => `${x.kind} in ${x.file}`).join("; ") });
       // What the web probes start from: where to try redirects, which screens to ask for unsigned in.
       {
-        const all = this.engagement.getState<Record<string, { redirectParams: string[]; routes: string[] }>>("jsLeads") ?? {};
+        const all = this.engagement.getState<Record<string, { redirectParams: string[]; routes: string[]; redirectExamples?: Array<{ param: string; value: string }> }>>("jsLeads") ?? {};
         const prev = all[canonicalOrigin(page.origin)] ?? { redirectParams: [], routes: [] };
-        all[canonicalOrigin(page.origin)] = { redirectParams: [...new Set([...prev.redirectParams, ...deep.redirectParams])].slice(0, 40), routes: [...new Set([...prev.routes, ...h.routes])].slice(0, 400) };
+        all[canonicalOrigin(page.origin)] = { redirectParams: [...new Set([...prev.redirectParams, ...deep.redirectParams])].slice(0, 40), routes: [...new Set([...prev.routes, ...h.routes])].slice(0, 400), redirectExamples: [...(prev.redirectExamples ?? []), ...examples].slice(0, 60) };
         this.engagement.setState("jsLeads", all);
       }
       if (deep.serverActions.length) {
@@ -1079,7 +1086,7 @@ export class ToolRunner {
     if (resolvedHeader?.missing.length) return this.deny(caller, "apiprobe", [base.href], [base.href], input.risk, { decision: "deny", code: "UNKNOWN_SECRET", reason: `Unknown secret(s): ${resolvedHeader.missing.join(", ")}` } as never);
     const headerLine = resolvedHeader?.argv[0];
     const run = this.engagement.startRun({ actor: caller.actor, origin: caller.origin, tool: "apiprobe", command: label, targets: [base.href], risk: input.risk, policy: { result: approvedBy ? "approved" : "allowed", ...(decision.ruleId ? { ruleId: decision.ruleId } : {}) }, runner: "local", attack: ["T1595"] });
-    const probe = async (path: string, withHeader: boolean): Promise<{ status: number; size: number } | undefined> => {
+    const probe = async (path: string, withHeader: boolean): Promise<{ status: number; size: number; secrets?: boolean } | undefined> => {
       try {
         const u = new URL(samplePath(path), base.origin);
         const headers: Array<[string, string]> = [["Host", u.host]];
@@ -1088,7 +1095,7 @@ export class ToolRunner {
           if (i > 0) headers.push([headerLine.slice(0, i).trim(), headerLine.slice(i + 1).trim()]);
         }
         const r = await sendHttp(u, { method: "GET", path: u.pathname + u.search, headers, body: "" });
-        return { status: r.status, size: r.size };
+        return { status: r.status, size: r.size, ...(SECRET_FIELDS.test(r.body.slice(0, 200_000)) ? { secrets: true } : {}) };
       } catch {
         return undefined;
       }
@@ -1128,7 +1135,7 @@ export class ToolRunner {
       const declared = new Map<string, boolean>();
       const app = this.engagement.query({ kind: "webapp", limit: 500 }).find((a) => canonicalOrigin(String(a.attributes.origin)) === canonicalOrigin(base.origin));
       if (app) for (const ep of this.engagement.query({ kind: "endpoint", limit: 50_000 })) if (ep.attributes.webappId === app.id && typeof ep.attributes.requiresAuth === "boolean") declared.set(String(ep.attributes.pathTemplate), ep.attributes.requiresAuth as boolean);
-      const results: Array<{ path: string; noAuth?: number; size?: number; withHeader?: number }> = new Array(paths.length);
+      const results: Array<{ path: string; noAuth?: number; size?: number; secrets?: boolean; withHeader?: number }> = new Array(paths.length);
       let next = 0;
       // A few requests at a time: quick on hundreds of routes, gentle on the server.
       await Promise.all(
@@ -1138,7 +1145,7 @@ export class ToolRunner {
             const path = paths[i]!;
             const na = await probe(path, false);
             const wh = headerLine ? await probe(path, true) : undefined;
-            results[i] = { path, ...(na ? { noAuth: na.status, size: na.size } : {}), ...(wh ? { withHeader: wh.status } : {}) };
+            results[i] = { path, ...(na ? { noAuth: na.status, size: na.size, ...(na.secrets ? { secrets: true } : {}) } : {}), ...(wh ? { withHeader: wh.status } : {}) };
           }
         }),
       );
@@ -1151,7 +1158,9 @@ export class ToolRunner {
       // A static asset (a stylesheet, script, image, font…) answering without auth is public by
       // design, not an exposure: it would only flood the results. So are robots.txt, the sign-in
       // and sign-up pages and the legal pages.
-      const open = results.filter((r) => r?.noAuth !== undefined && r.noAuth >= 200 && r.noAuth < 300 && declared.get(r.path) !== false && !isStaticAsset(r.path) && !isPublicByDesign(r.path) && (refusing || r.noAuth !== mode || declared.get(r.path) === true));
+      // Also, whatever the rest answer: a debug, admin or internal route open to anyone, and any answer
+      // carrying passwords or keys. In a mostly public API those look "normal" and would slip by.
+      const open = results.filter((r) => r?.noAuth !== undefined && r.noAuth >= 200 && r.noAuth < 300 && declared.get(r.path) !== false && !isStaticAsset(r.path) && !isPublicByDesign(r.path) && (refusing || r.noAuth !== mode || declared.get(r.path) === true || SENSITIVE_ROUTE.test(r.path) || r.secrets === true));
       const items: unknown[] = [];
       for (const r of results.filter(Boolean)) {
         if (r?.noAuth !== undefined) items.push({ op: "upsert", kind: "endpoint", key: { origin: base.origin, path: r.path.split("?")[0] }, attributes: { statusesSeen: [r.noAuth] }, confidence: 0.8 });
@@ -1169,7 +1178,7 @@ export class ToolRunner {
             /* the observation stands without it */
           }
         }
-        items.push({ op: "observe", title: `Endpoint answers without authentication: ${r.path}`, sourceRule: "apiprobe:no-auth", affects: [{ kind: "endpoint", key: { origin: base.origin, path: r.path.split("?")[0] } }], severityHint: refusing || contract ? "high" : "medium", detail: `GET ${samplePath(r.path)} returned ${r.noAuth} (${r.size} bytes) with no credentials${contract ? ", although the API's own contract says it requires authentication" : `, while most endpoints return ${mode}`}. Verify it exposes data or an action that should require authentication.`, ...(bodyRaw ? { rawId: bodyRaw } : {}) });
+        items.push({ op: "observe", title: `${r.secrets ? "Endpoint returns passwords or keys without authentication" : "Endpoint answers without authentication"}: ${r.path}`, sourceRule: "apiprobe:no-auth", affects: [{ kind: "endpoint", key: { origin: base.origin, path: r.path.split("?")[0] } }], severityHint: refusing || contract || r.secrets || SENSITIVE_ROUTE.test(r.path) ? "high" : "medium", detail: `GET ${samplePath(r.path)} returned ${r.noAuth} (${r.size} bytes) with no credentials${contract ? ", although the API's own contract says it requires authentication" : `, while most endpoints return ${mode}`}. Verify it exposes data or an action that should require authentication.`, ...(bodyRaw ? { rawId: bodyRaw } : {}) });
       }
       // Server errors met while sweeping: leads to vary the input on (the first few).
       for (const r of results.filter((x) => x?.noAuth !== undefined && leadFor(x.noAuth, "")).slice(0, 5)) {
@@ -1432,7 +1441,7 @@ export class ToolRunner {
   async webProbe(input: WebProbeInput, caller: ToolCaller, approvedBy?: Actor): Promise<RunOutcome> {
     const base = new URL(input.origin);
     const origin = base.origin;
-    const leads = this.engagement.getState<Record<string, { redirectParams: string[]; routes: string[] }>>("jsLeads")?.[canonicalOrigin(origin)] ?? { redirectParams: [], routes: [] };
+    const leads = this.engagement.getState<Record<string, { redirectParams: string[]; routes: string[]; redirectExamples?: Array<{ param: string; value: string }> }>>("jsLeads")?.[canonicalOrigin(origin)] ?? { redirectParams: [], routes: [] };
     const endpoints = this.engagement.query({ kind: "endpoint", limit: 20000 }).filter((e) => e.naturalKey.startsWith(`${canonicalOrigin(origin)}|`));
     const label = `${input.check} probe ${origin}`;
     const decision = this.check([base.href], input.risk, approvedBy ? { type: "human" } : caller.policy);
@@ -1458,7 +1467,8 @@ export class ToolRunner {
         const params = new Set([...leads.redirectParams.filter((p) => p.length > 1), "redirect", "redirectUrl", "returnUrl", "next", "callbackUrl", "url", "returnTo"]);
         const targets = input.targets?.length ? input.targets : [...paths].slice(0, 8).flatMap((path) => [...params].slice(0, 10).map((param) => ({ path, param })));
         for (const t of targets.slice(0, 80)) {
-          for (const payload of REDIRECT_PAYLOADS) {
+          const legit = (leads.redirectExamples ?? []).filter((x) => x.param.toLowerCase() === t.param.toLowerCase()).slice(0, 2).flatMap((x) => allowlistBypasses(x.value));
+          for (const payload of [...REDIRECT_PAYLOADS, ...legit]) {
             const path = `${t.path}${t.path.includes("?") ? "&" : "?"}${encodeURIComponent(t.param)}=${payload.includes("%") ? payload : encodeURIComponent(payload)}`;
             tried++;
             const { r, exchange } = await get(path);
@@ -1653,8 +1663,11 @@ export class ToolRunner {
     const given = new URL(raw);
     const host = given.hostname.replace(/^\[|\]$/g, "");
     const port = given.protocol === "https:" ? Number(given.port || 443) : 443;
-    const https = new URL(`https://${given.host.replace(/:\d+$/, "")}${port !== 443 ? `:${port}` : ""}${input.path ?? "/"}`);
-    const plain = new URL(`http://${host}${input.path ?? "/"}`);
+    let https = new URL(`https://${given.host.replace(/:\d+$/, "")}${port !== 443 ? `:${port}` : ""}${input.path ?? "/"}`);
+    // Given as http://host:port: that is the plain site; HTTPS is checked only where it is in scope.
+    const plain = given.protocol === "http:" ? new URL(`${given.origin}${input.path ?? "/"}`) : new URL(`http://${host}${input.path ?? "/"}`);
+    const httpsInScope = given.protocol === "https:" || this.check([https.href], input.risk, approvedBy ? { type: "human" } : caller.policy).decision !== "deny";
+    if (!httpsInScope) https = plain;
     const label = `transport ${https.origin}`;
     const decision = this.check([https.href], input.risk, approvedBy ? { type: "human" } : caller.policy);
     if (decision.decision === "deny") return this.deny(caller, "transport", [https.href], [https.href], input.risk, decision);
@@ -1667,15 +1680,17 @@ export class ToolRunner {
     const log: string[] = [`# ${label}`];
     const issues: TransportIssue[] = [];
     try {
-      // TLS versions and weak cipher families.
-      const modern = await tryHandshake(host, port, "TLSv1.2", CIPHERS.broad);
+      // TLS versions and weak cipher families (only where HTTPS is there to test).
+      const tlsOn = https.protocol === "https:";
+      if (!tlsOn) log.push("HTTPS: not checked (not in scope); the site was checked over plain HTTP");
+      const modern = tlsOn ? await tryHandshake(host, port, "TLSv1.2", CIPHERS.broad) : { accepted: false, error: "not checked" };
       log.push(`TLSv1.2 (broad ciphers): ${modern.accepted ? "accepted" : modern.error ?? "refused"}`);
-      for (const v of ["SSLv3", "TLSv1.0", "TLSv1.1"] as const) {
+      for (const v of tlsOn ? (["SSLv3", "TLSv1.0", "TLSv1.1"] as const) : []) {
         const r = await tryHandshake(host, port, v, CIPHERS.broad);
         log.push(`${v}: ${r.accepted ? `ACCEPTED (cipher 0x${r.cipher!.toString(16).padStart(4, "0")})` : r.error ?? "refused"}`);
         if (r.accepted) issues.push({ key: `tls:${v}`, severity: TLS_VERSION_SEVERITY[v], title: `${v} accepted`, detail: `${host}:${port} completes a ${v} handshake. ${v === "SSLv3" ? "SSLv3 is broken (POODLE)." : "TLS 1.0 and 1.1 are deprecated (RFC 8996) and fail PCI DSS."}` });
       }
-      for (const fam of ["3DES", "RC4", "NULL or EXPORT"] as const) {
+      for (const fam of tlsOn ? (["3DES", "RC4", "NULL or EXPORT"] as const) : []) {
         let hit: { v: string; cipher: number } | undefined;
         for (const v of ["TLSv1.2", "TLSv1.0"] as const) {
           const r = await tryHandshake(host, port, v, CIPHERS[fam]);
@@ -1687,12 +1702,15 @@ export class ToolRunner {
         log.push(`${fam} ciphers: ${hit ? `ACCEPTED (${hit.v}, 0x${hit.cipher.toString(16).padStart(4, "0")})` : "refused"}`);
         if (hit) issues.push({ key: `cipher:${fam}`, severity: WEAK_CIPHER_SEVERITY[fam], title: `${fam} ciphers accepted`, detail: `${host}:${port} agrees to cipher 0x${hit.cipher.toString(16).padStart(4, "0")} over ${hit.v}. ${fam === "3DES" ? "3DES is vulnerable to SWEET32." : fam === "RC4" ? "RC4 is broken." : "These give no real encryption."}` });
       }
-      const cert = await peerCertificate(host, port);
-      log.push(`certificate: ${cert.cert?.subject?.CN ?? "?"}, valid to ${cert.cert?.valid_to ?? "?"}, ${cert.authorized ? "trusted" : `not trusted (${cert.error ?? "?"})`}`);
-      issues.push(...certificateIssues(host, cert));
+      if (tlsOn) {
+        const cert = await peerCertificate(host, port);
+        log.push(`certificate: ${cert.cert?.subject?.CN ?? "?"}, valid to ${cert.cert?.valid_to ?? "?"}, ${cert.authorized ? "trusted" : `not trusted (${cert.error ?? "?"})`}`);
+        issues.push(...certificateIssues(host, cert));
+      }
       // Plain HTTP: turned away to HTTPS, or served as it is - only when port 80 is in scope too.
       const get = (u: URL, extra: Array<[string, string]> = []) => sendHttp(u, { method: "GET", path: u.pathname + u.search, headers: [["Host", u.host], ...extra], body: "" });
-      if (this.check([plain.href], input.risk, approvedBy ? { type: "human" } : caller.policy).decision === "deny") log.push(`plain HTTP: not checked (${plain.origin} is not in scope)`);
+      if (!tlsOn) issues.push({ key: "http:only", severity: "medium", title: "No HTTPS in scope: the site was reached over plain HTTP", detail: `${plain.origin} answers over plain HTTP and no HTTPS origin for it is in scope. If the site is used like this, sessions and data travel unencrypted.` });
+      else if (this.check([plain.href], input.risk, approvedBy ? { type: "human" } : caller.policy).decision === "deny") log.push(`plain HTTP: not checked (${plain.origin} is not in scope)`);
       else try {
         const r = await get(plain);
         const loc = r.headers.find(([k]) => k.toLowerCase() === "location")?.[1] ?? "";
@@ -1707,7 +1725,7 @@ export class ToolRunner {
       const r = await get(https);
       const type = r.headers.find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "";
       log.push(`HTTPS ${https.pathname}: ${r.status} ${type}`);
-      issues.push(...headerIssues(r.headers, /html/i.test(type)), ...cookieIssues(r.headers.filter(([k]) => k.toLowerCase() === "set-cookie").map(([, v]) => v), true));
+      issues.push(...headerIssues(r.headers, /html/i.test(type)).filter((i) => tlsOn || !i.key.startsWith("hsts")), ...cookieIssues(r.headers.filter(([k]) => k.toLowerCase() === "set-cookie").map(([, v]) => v), tlsOn));
       for (const o of ["https://penteos-cors-check.invalid", "null"]) {
         const c = await get(https, [["Origin", o]]);
         const issue = corsIssue(o, c.headers);

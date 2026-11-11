@@ -13,6 +13,35 @@ export const REDIRECT_CANARY = "penteos-redirect.invalid";
 /** Ways of writing "go to the canary" that filters often miss. */
 export const REDIRECT_PAYLOADS = [`https://${REDIRECT_CANARY}/`, `//${REDIRECT_CANARY}/`, `/\\${REDIRECT_CANARY}/`, `https:${REDIRECT_CANARY}`, `%2F%2F${REDIRECT_CANARY}%2F`, `https://${REDIRECT_CANARY}%2F@trusted/`];
 
+/** Legitimate redirect values the app itself uses (?to=https://github.com/org/repo), per parameter. */
+export function redirectExamples(text: string): Array<{ param: string; value: string }> {
+  const out = new Map<string, { param: string; value: string }>();
+  for (const m of text.matchAll(/[?&]([A-Za-z_][\w-]{0,30})=(https?(?::|%3A)(?:\/\/|%2F%2F)[^"'`&\s<>)]{3,200})/gi)) {
+    let value = m[2]!;
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      /* as written */
+    }
+    if (out.size < 50) out.set(`${m[1]}=${value}`, { param: m[1]!, value });
+  }
+  return [...out.values()];
+}
+
+/**
+ * Payloads that keep a legitimate value in the URL while going elsewhere: what beats allowlists
+ * that only check the value appears in it, starts with it, or ends with its host.
+ */
+export function allowlistBypasses(legit: string): string[] {
+  let host = "";
+  try {
+    host = new URL(legit).host;
+  } catch {
+    return [];
+  }
+  return [`https://${REDIRECT_CANARY}/?${legit}`, `https://${REDIRECT_CANARY}/#${legit}`, `https://${host}.${REDIRECT_CANARY}/`, `https://${host}@${REDIRECT_CANARY}/`, `${legit}@${REDIRECT_CANARY}/`];
+}
+
 /** Whether an answer sends the browser to the canary: a Location, a meta refresh or a script. */
 export function redirectsToCanary(status: number, headers: Array<[string, string]>, body: string, from: string): boolean {
   const loc = headers.find(([k]) => k.toLowerCase() === "location")?.[1];
