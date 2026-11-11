@@ -6,7 +6,7 @@ name: bench
 on:
   workflow_dispatch:
   push:
-    branches: [mac]
+    branches: [main]
     paths:
       - scripts/bench/**
       - .github/workflows/bench.yml

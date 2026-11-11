@@ -11,11 +11,6 @@ on:
         description: "Tools to refresh (comma-separated), empty for all"
         required: false
         default: ""
-  push:
-    branches: [mac]
-    paths:
-      - scripts/tools/refresh-catalog.mjs
-      - .github/workflows/tool-catalog.yml
 
 permissions:
   contents: read

@@ -4,6 +4,54 @@ All notable changes to Penteos are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-11-11
+
+The release that makes Penteos test like a careful team: deeper rounds, new checks, an honest
+report, and macOS.
+
+### macOS
+- **Penteos for Mac**, Apple Silicon and Intel, with the same one-line installer. It installs
+  without a password, opens without Gatekeeper's warning, and updates itself.
+- Every release is built and installed on both Mac chips and on eleven Linux distributions, and is
+  published only if all of them pass.
+
+### Rounds that do not end early
+- **Surface found outside the scope** waits for a decision: propose including it, or set it aside
+  with the reason. A round does not close while any host is undecided.
+- **Server errors and unreachable origins are leads**, never "not applicable". A 5xx means the input
+  reached code that was not ready for it; a CDN that cannot reach its origin may point to a
+  takeover.
+- A round does not close with open leads, or with OWASP WSTG categories nobody tested or recorded
+  as partial or not applicable with the reason.
+
+### New checks
+- **TLS and HTTPS**: old TLS versions and weak ciphers (hand-built handshakes, since OpenSSL 3 cannot
+  even offer 3DES or RC4), the certificate, plain HTTP, HSTS, cookie flags, CSP, framing and CORS.
+- **Mail spoofing** (SPF, DMARC, DKIM) and **subdomain takeover**.
+- **Open redirects** (including past allowlists), **path traversal** in path parameters, and
+  **panels served with an invented session cookie**.
+- **All of an app's JavaScript**: every chunk, the original code from served source maps (kept in
+  the project), configuration, message listeners, DOM sinks, redirect parameters, client-computed
+  fields and **Next.js server actions**, which can be probed without a session.
+- **GraphQL**: introspection (schema kept), suggestions, batching, GET.
+- **With test accounts**: one account's requests replayed as another and as nobody (IDOR/BOLA,
+  privilege escalation), race conditions, sessions that survive logout, amounts for the fuzzer.
+- The API sweep flags debug, admin and internal routes, and answers carrying passwords or keys.
+
+### An honest report
+- The **overall risk follows the coverage**: "Not determined" (or "at least High") when too little
+  was tested, with what was missing written out.
+- An unfinished report is a **draft on every page**; only a person accepts limits for a final one.
+- Nothing internal reaches the reader. The tools annex lists only what touched a target. Assets
+  discovered outside the scope are listed as not tested.
+- **A previous assessment** (another team's PDF or Word report) can be loaded as the baseline: the
+  report says what was fixed, what is still open and what is new.
+
+### Also
+- Rate-limit tests send at least 15 attempts, and a later 429 settles an earlier "no limit".
+- Updates count as installed when the system has the new version, even if the package manager
+  stumbles on another package. About Penteos shows the author and contact.
+
 ## [0.1.3] - 2026-11-10
 
 - **A web application in scope covers its name.** With `https://app.example.com` in scope,

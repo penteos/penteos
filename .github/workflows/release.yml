@@ -8,9 +8,6 @@ name: release
 on:
   push:
     tags: ["v*"]
-    # While macOS support is built: the Mac packages are made and tested on every push to this
-    # branch. Only a tag builds Linux and publishes (see the "if" of build and publish).
-    branches: [mac]
 
 permissions:
   contents: read
