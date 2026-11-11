@@ -156,6 +156,76 @@ defineOperation({
 });
 
 defineOperation({
+  name: "web.probe_redirects",
+  title: "Probe for open redirects",
+  description: "Sends the parameters that say where to go next (the ones the JavaScript names, the usual ones, or the ones given: targets [{path, param}]) an outside address in the encodings filters miss, and reports each that sends the browser there (Location, meta refresh, script). Login, logout, SSO and callback routes first.",
+  kind: "target",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId, origin: z.string().url(), targets: z.array(z.object({ path: z.string().startsWith("/"), param: z.string().min(1) })).max(80).optional(), risk: RiskLevel.default("active") }),
+  handler: async (input, ctx) => outcome(await ctx.runner(input.engagementId).webProbe({ check: "redirect", origin: input.origin, ...(input.targets?.length ? { targets: input.targets } : {}), risk: input.risk }, { ...ctx.caller, origin: ctx.caller.actor.type === "agent" ? "agent_tool" : "runner" }), ctx),
+});
+
+defineOperation({
+  name: "web.probe_traversal",
+  title: "Probe path parameters for traversal",
+  description: "For endpoints with a path parameter (/api/onboarding/{id}, from the graph or given as templates), compares a normal value with ../ in its encodings (%2f, %252f, ..;/, %2e%2e…) and reports where the parameter walks out of its route (success where a normal value fails, another kind of answer). Run it on every templated API route, and on any route that answered 5xx to an odd value.",
+  kind: "target",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId, origin: z.string().url(), templates: z.array(z.string().startsWith("/")).max(50).optional(), risk: RiskLevel.default("active") }),
+  handler: async (input, ctx) => outcome(await ctx.runner(input.engagementId).webProbe({ check: "traversal", origin: input.origin, ...(input.templates?.length ? { templates: input.templates } : {}), risk: input.risk }, { ...ctx.caller, origin: ctx.caller.actor.type === "agent" ? "agent_tool" : "runner" }), ctx),
+});
+
+defineOperation({
+  name: "web.probe_session_guard",
+  title: "Probe panels with an invented session",
+  description: "Asks for each screen that should need a session (dashboard, admin, account… from the JavaScript's routes, or the paths given) without a cookie and with invented session cookies, and reports the ones that send to the login without a cookie but serve themselves with a made-up one: the guard checks the cookie exists, not that the session is valid. Run it on every app with a login, admin panels first.",
+  kind: "target",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId, origin: z.string().url(), paths: z.array(z.string().startsWith("/")).max(20).optional(), risk: RiskLevel.default("active") }),
+  handler: async (input, ctx) => outcome(await ctx.runner(input.engagementId).webProbe({ check: "guard", origin: input.origin, ...(input.paths?.length ? { paths: input.paths } : {}), risk: input.risk }, { ...ctx.caller, origin: ctx.caller.actor.type === "agent" ? "agent_tool" : "runner" }), ctx),
+});
+
+defineOperation({
+  name: "dns.check_mail",
+  title: "Check a domain's mail spoofing defences",
+  description: "SPF, DMARC and DKIM (common selectors) of a domain, with lookups only (passive): missing or permissive SPF, DMARC missing or p=none, no reports. Run it on the client's main domains: a spoofable domain is a phishing vector against their own customers.",
+  kind: "target",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId, domain: z.string().min(3) }),
+  handler: async (input, ctx) => outcome(await ctx.runner(input.engagementId).checkDns({ kind: "mail", domain: input.domain }, { ...ctx.caller, origin: ctx.caller.actor.type === "agent" ? "agent_tool" : "runner" }), ctx),
+});
+
+defineOperation({
+  name: "dns.check_takeover",
+  title: "Check names for subdomain takeover",
+  description: "Follows each name's CNAME chain (passive lookups) and reports the ones ending at a service that can be claimed (GitHub Pages, S3, CloudFront, Heroku, Azure, Netlify, Vercel, Shopify, Fastly and others) while unclaimed, or at a name that does not exist. Names in scope for active work are also asked over HTTP(S) for the service's 'does not exist' page. Without names, every domain in the graph that is in scope. Run it after subdomain discovery, and on any name a CDN cannot reach (530).",
+  kind: "target",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId, names: z.array(z.string().min(3)).max(300).optional() }),
+  handler: async (input, ctx) => outcome(await ctx.runner(input.engagementId).checkDns({ kind: "takeover", ...(input.names?.length ? { names: input.names } : {}) }, { ...ctx.caller, origin: ctx.caller.actor.type === "agent" ? "agent_tool" : "runner" }), ctx),
+});
+
+defineOperation({
+  name: "web.check_transport",
+  title: "Check TLS, HTTPS and security headers",
+  description:
+    "Checks how a site protects the connection, in one call: TLS versions still accepted (SSLv3, TLS 1.0/1.1) and weak ciphers (3DES, RC4, NULL/EXPORT) with hand-built handshakes, the certificate (expired, wrong name, untrusted), whether plain HTTP redirects to HTTPS, HSTS, cookie flags (Secure, HttpOnly, SameSite), CSP (unsafe-inline/eval, wildcards), framing (clickjacking) and CORS (an arbitrary or null origin reflected, with credentials). Run it on every web host in scope - payments and login sites first. Each problem becomes an observation with the evidence.",
+  kind: "target",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId, target: z.string().min(1).describe("The site: https://host[:port] or the host"), path: z.string().optional().describe("The page to read headers from (default /)"), risk: RiskLevel.default("active") }),
+  handler: async (input, ctx) => {
+    let result: RunOutcome;
+    try {
+      result = await ctx.runner(input.engagementId).checkTransport({ target: input.target, ...(input.path ? { path: input.path } : {}), risk: input.risk }, { ...ctx.caller, origin: ctx.caller.actor.type === "agent" ? "agent_tool" : "runner" });
+    } catch (e) {
+      if (e instanceof OperationError) throw e;
+      throw new OperationError("VALIDATION_ERROR", (e as Error).message);
+    }
+    return outcome(result, ctx);
+  },
+});
+
+defineOperation({
   name: "web.probe_server_actions",
   title: "Probe Next.js server actions",
   description:

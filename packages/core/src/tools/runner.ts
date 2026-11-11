@@ -12,6 +12,9 @@ import { analyzeNmapArgs, NMAP_PRESETS } from "./nmap.js";
 import { exploitationAllowed, setPhase } from "../plan.js";
 import { formatRequest, formatResponse, type HttpResponse, paramsOf, parseRawRequest, requestUrl, sendHttp } from "../http.js";
 import { harvestScript, type JsHarvest, mergeHarvests, scriptUrls } from "../webjs.js";
+import { fillTemplate, guardedRoutes, looksSentAway, REDIRECT_CANARY, REDIRECT_PAYLOADS, redirectsToCanary, SESSION_COOKIES, traversalReached, TRAVERSAL_PAYLOADS } from "../webprobes.js";
+import { type DnsIssue, lookupMail, lookupName, mailIssues, TAKEOVER_SERVICES, takeoverIssue } from "../dnscheck.js";
+import { certificateIssues, CIPHERS, cookieIssues, corsIssue, headerIssues, peerCertificate, TLS_VERSION_SEVERITY, type TransportIssue, tryHandshake, WEAK_CIPHER_SEVERITY } from "../transport.js";
 import { type DeepSignals, deepSignals, jsReferences, mergeSignals, recoverSources, safeSourcePath, sourceMapUrl } from "../webjs-deep.js";
 import { offlineSandbox } from "../sandbox.js";
 import { parseApiSpec, samplePath } from "../apispec.js";
@@ -206,7 +209,21 @@ export type ProbeRequest =
   | { tool: "enumeration"; input: EnumerationInput }
   | { tool: "versions"; input: { origin: string; slugs?: string[]; risk: RiskLevel } }
   | { tool: "browser"; input: { action: BrowseAction; risk: RiskLevel } }
-  | { tool: "serveractions"; input: ServerActionsInput };
+  | { tool: "serveractions"; input: ServerActionsInput }
+  | { tool: "transport"; input: { target: string; path?: string; risk: RiskLevel } }
+  | { tool: "webprobe"; input: WebProbeInput };
+
+export type WebProbeInput =
+  | { check: "redirect"; origin: string; targets?: Array<{ path: string; param: string }>; risk: RiskLevel }
+  | { check: "traversal"; origin: string; templates?: string[]; risk: RiskLevel }
+  | { check: "guard"; origin: string; paths?: string[]; risk: RiskLevel };
+
+export interface WebProbeHit {
+  title: string;
+  severity: "low" | "medium" | "high";
+  detail: string;
+  path: string;
+}
 
 export interface ServerActionsInput {
   origin: string;
@@ -295,6 +312,9 @@ export type RunOutcome =
   | { status: "apispec"; run: Run; routes?: Array<{ path: string; methods: string[]; requiresAuth?: boolean }>; title?: string; rawId?: string; error?: string }
   | { status: "ratelimit"; run: Run; attempts: number; defence?: string; results?: RateLimitResult[]; rawId?: string; error?: string }
   | { status: "serveractions"; run: Run; results?: ServerActionResult[]; rawId?: string; error?: string }
+  | { status: "transport"; run: Run; issues?: TransportIssue[]; rawId?: string; error?: string }
+  | { status: "dnscheck"; run: Run; issues?: DnsIssue[]; checked?: number; rawId?: string; error?: string }
+  | { status: "webprobe"; run: Run; check: WebProbeInput["check"]; tried: number; hits?: WebProbeHit[]; rawId?: string; error?: string }
   | { status: "enumeration"; run: Run; result?: EnumerationResult; rawId?: string; sampleRawId?: string; error?: string }
   | { status: "versions"; run: Run; found?: Array<{ product: string; version: string; source: string; confidence: number; ecosystem?: string }>; rawId?: string; error?: string }
   | { status: "probe"; run: Run; basePath?: string; baseTrials?: Array<{ basePath: string; exist: number; of: number }>; results?: Array<{ path: string; noAuth?: number; size?: number; withHeader?: number }>; open?: string[]; modeStatus?: number; rawId?: string; error?: string }
@@ -962,6 +982,13 @@ export class ToolRunner {
       if (deep.redirectParams.length) items.push({ op: "observe", title: `Redirect parameters in the code: ${deep.redirectParams.slice(0, 6).join(", ")}`, sourceRule: "lead:redirect", affects: app, severityHint: "info", detail: "Parameters that say where to go next: test each one for open redirect (an external URL, //host, /\\host, encoded forms) on the screens and endpoints that take it." });
       if (deep.clientFields.length) items.push({ op: "observe", title: `Fields the browser computes and sends: ${deep.clientFields.slice(0, 6).join(", ")}`, sourceRule: "lead:client-trust", affects: app, severityHint: "info", detail: "Values the client computes (IP, time zone, device, fingerprint, risk) can be sent with anything. Find the requests that carry them and check whether the server trusts them (fraud signals, limits, geofencing)." });
       if (deep.sinks.length) items.push({ op: "observe", title: `DOM sinks in the application's code: ${[...new Set(deep.sinks.map((x) => x.kind))].join(", ")}`, sourceRule: "webjs:sinks", affects: app, severityHint: "info", detail: deep.sinks.slice(0, 20).map((x) => `${x.kind} in ${x.file}`).join("; ") });
+      // What the web probes start from: where to try redirects, which screens to ask for unsigned in.
+      {
+        const all = this.engagement.getState<Record<string, { redirectParams: string[]; routes: string[] }>>("jsLeads") ?? {};
+        const prev = all[canonicalOrigin(page.origin)] ?? { redirectParams: [], routes: [] };
+        all[canonicalOrigin(page.origin)] = { redirectParams: [...new Set([...prev.redirectParams, ...deep.redirectParams])].slice(0, 40), routes: [...new Set([...prev.routes, ...h.routes])].slice(0, 400) };
+        this.engagement.setState("jsLeads", all);
+      }
       if (deep.serverActions.length) {
         const all = this.engagement.getState<Record<string, Array<{ id: string; name?: string; file: string }>>>("serverActions") ?? {};
         all[canonicalOrigin(page.origin)] = deep.serverActions;
@@ -1250,6 +1277,258 @@ export class ToolRunner {
   // -------------------------------------------------------------------------------------------
   // Rate limiting
   // -------------------------------------------------------------------------------------------
+
+  /**
+   * Open redirect, path traversal in path parameters and session guards that only check a cookie
+   * exists (webprobes.ts says how each is read). Candidates come from what was learned before - the
+   * redirect parameters and screens the JavaScript names, the endpoint templates in the graph - or
+   * are given. Politely paced; every exchange that shows something is kept as evidence.
+   */
+  async webProbe(input: WebProbeInput, caller: ToolCaller, approvedBy?: Actor): Promise<RunOutcome> {
+    const base = new URL(input.origin);
+    const origin = base.origin;
+    const leads = this.engagement.getState<Record<string, { redirectParams: string[]; routes: string[] }>>("jsLeads")?.[canonicalOrigin(origin)] ?? { redirectParams: [], routes: [] };
+    const endpoints = this.engagement.query({ kind: "endpoint", limit: 20000 }).filter((e) => e.naturalKey.startsWith(`${canonicalOrigin(origin)}|`));
+    const label = `${input.check} probe ${origin}`;
+    const decision = this.check([base.href], input.risk, approvedBy ? { type: "human" } : caller.policy);
+    if (decision.decision === "deny") return this.deny(caller, "webprobe", [base.href], [base.href], input.risk, decision);
+    if (decision.decision === "ask") {
+      const grant = this.grantFor(caller, "webprobe", [origin], input.risk);
+      if (grant) return this.webProbe(input, { ...caller, policy: { type: "human" } }, grant.by);
+      return this.requestApproval(caller, decision, label, { kind: "http", origin, raw: `${input.check} checks on ${origin} (GET requests with test values)`, risk: input.risk, probe: { tool: "webprobe", input } });
+    }
+    const run = this.engagement.startRun({ actor: caller.actor, origin: caller.origin, tool: "webprobe", command: label, targets: [base.href], risk: input.risk, policy: { result: approvedBy ? "approved" : "allowed", ...(decision.ruleId ? { ruleId: decision.ruleId } : {}) }, runner: "local", attack: ["T1190"] });
+    const get = async (path: string, headers: Array<[string, string]> = []) => {
+      const u = new URL(path, origin);
+      const r = await sendHttp(u, { method: "GET", path: path.startsWith("/") ? path : u.pathname + u.search, headers: [["Host", u.host], ...headers], body: "" });
+      await new Promise((res) => setTimeout(res, 100));
+      return { r, exchange: `GET ${path} HTTP/1.1\nHost: ${u.host}${headers.map(([k, v]) => `\n${k}: ${v}`).join("")}\n\n${formatResponse(r).slice(0, 3000)}` };
+    };
+    const hits: Array<WebProbeHit & { exchange: string }> = [];
+    const log: string[] = [`# ${label}`];
+    let tried = 0;
+    try {
+      if (input.check === "redirect") {
+        const paths = new Set(["/", "/login", "/logout", "/auth/login", "/signin", ...endpoints.map((e) => String(e.attributes.pathTemplate ?? "")).filter((p) => /log-?in|log-?out|sign|auth|sso|oauth|callback|redirect|return/i.test(p) && !/[{:]/.test(p))]);
+        const params = new Set([...leads.redirectParams.filter((p) => p.length > 1), "redirect", "redirectUrl", "returnUrl", "next", "callbackUrl", "url", "returnTo"]);
+        const targets = input.targets?.length ? input.targets : [...paths].slice(0, 8).flatMap((path) => [...params].slice(0, 10).map((param) => ({ path, param })));
+        for (const t of targets.slice(0, 80)) {
+          for (const payload of REDIRECT_PAYLOADS) {
+            const path = `${t.path}${t.path.includes("?") ? "&" : "?"}${encodeURIComponent(t.param)}=${payload.includes("%") ? payload : encodeURIComponent(payload)}`;
+            tried++;
+            const { r, exchange } = await get(path);
+            if (redirectsToCanary(r.status, r.headers, r.body, new URL(path, origin).href)) {
+              log.push(`REDIRECT ${path} → ${r.status}`);
+              hits.push({ title: `Open redirect: ${t.param} on ${t.path}`, severity: "medium", path: t.path, detail: `GET ${path} sends the browser to ${REDIRECT_CANARY} (${r.status}). Links on the client's own domain can take users to any site (phishing, stolen OAuth codes when used in a login flow).`, exchange });
+              break;
+            }
+          }
+        }
+      } else if (input.check === "traversal") {
+        const templates = input.templates?.length ? input.templates : [...new Set(endpoints.map((e) => String(e.attributes.pathTemplate ?? "")).filter((p) => /\{[^}]+\}|:[A-Za-z_]/.test(p)))].slice(0, 25);
+        for (const tpl of templates) {
+          const normal = fillTemplate(tpl, "penteos-probe-1");
+          if (!normal) continue;
+          tried++;
+          const b = await get(normal);
+          const answer = (x: typeof b.r) => ({ status: x.status, size: x.body.length, type: x.headers.find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "" });
+          const baseline = answer(b.r);
+          log.push(`${normal}: ${baseline.status} ${baseline.size}B ${baseline.type}`);
+          for (const payload of TRAVERSAL_PAYLOADS) {
+            const path = fillTemplate(tpl, payload)!;
+            tried++;
+            const v = await get(path);
+            const ans = answer(v.r);
+            log.push(`  ${path}: ${ans.status} ${ans.size}B ${ans.type}`);
+            if (traversalReached(baseline, ans)) {
+              hits.push({ title: `Path parameter of ${tpl} walks out of its route (${payload})`, severity: "medium", path: tpl, detail: `A normal value answers ${baseline.status} (${baseline.size} bytes, ${baseline.type || "no type"}); ${payload} in its place answers ${ans.status} (${ans.size} bytes, ${ans.type || "no type"}). The parameter reaches other routes of the server: find which (add the route after the payload: ${path}health, …) and whether they need authentication.`, exchange: `${b.exchange}\n\n----\n\n${v.exchange}` });
+              break;
+            }
+          }
+        }
+      } else {
+        const fromRoutes = guardedRoutes([...leads.routes, ...endpoints.map((e) => String(e.attributes.pathTemplate ?? ""))]);
+        const paths = input.paths?.length ? input.paths : fromRoutes.length ? fromRoutes : ["/dashboard", "/admin", "/account"];
+        const seenCookies = this.engagement.getState<string[]>("cookieNames") ?? [];
+        const names = [...new Set([...seenCookies, ...SESSION_COOKIES])].slice(0, 30);
+        const fake = `penteos-invented-${ulid().toLowerCase()}`;
+        for (const path of paths.slice(0, 20)) {
+          tried += 2;
+          const none = await get(path);
+          if (!looksSentAway(none.r.status, none.r.headers)) {
+            log.push(`${path}: ${none.r.status} without a cookie (not guarded, or not a screen)`);
+            continue;
+          }
+          const withFake = await get(path, [["Cookie", names.map((n) => `${n}=${fake}`).join("; ")]]);
+          log.push(`${path}: ${none.r.status} without a cookie, ${withFake.r.status} with invented ones`);
+          if (withFake.r.status >= 200 && withFake.r.status < 300) {
+            hits.push({ title: `${path} is served with an invented session cookie`, severity: "medium", path, detail: `Without a cookie ${path} sends to the login (${none.r.status}); with made-up session cookies it answers ${withFake.r.status} (${withFake.r.body.length} bytes). The guard checks that a cookie exists, not that the session is valid. If the page renders data on the server, that data is exposed; if it only draws the shell, the risk is latent (any server-rendered route added later is open).`, exchange: `${none.exchange}\n\n----\n\n${withFake.exchange}` });
+          }
+        }
+      }
+      const rawId = this.engagement.putRaw(log.join("\n"), { type: "stdout", mime: "text/plain", runId: run.id });
+      const items = hits.flatMap((h) => {
+        const ex = this.engagement.putRaw(h.exchange, { type: "http_exchange", mime: "message/http", runId: run.id });
+        const key = { origin, path: h.path.split("?")[0] };
+        // The endpoint may not be in the graph yet (a screen known only from the JavaScript).
+        return [
+          { op: "upsert", kind: "endpoint", key, attributes: { methods: ["GET"] }, confidence: 0.9 },
+          { op: "observe", title: h.title, sourceRule: `webprobe:${input.check}`, affects: [{ kind: "endpoint", key }], severityHint: h.severity, detail: h.detail, rawId: ex },
+        ];
+      });
+      const ingested = items.length ? this.engagement.ingest({ format: INGEST_FORMAT, source: { parser: "webprobe@0.1.0", tool: "webprobe" }, rawIds: [rawId], observedAt: new Date().toISOString(), items } as never, caller.actor) : undefined;
+      const done = this.engagement.finishRun(run.id, { status: "finished", rawIds: [rawId], summary: { check: input.check, tried, hits: hits.length, ...(ingested ? { ingested } : {}) } });
+      return { status: "webprobe", run: done, check: input.check, tried, hits: hits.map(({ exchange: _x, ...h }) => h), rawId };
+    } catch (e) {
+      const done = this.engagement.finishRun(run.id, { status: "failed", summary: { error: (e as Error).message } });
+      return { status: "webprobe", run: done, check: input.check, tried, hits: hits.map(({ exchange: _x, ...h }) => h), error: (e as Error).message };
+    }
+  }
+
+  /**
+   * DNS-only checks (passive: lookups, nothing sent to the target's servers but the resolvers):
+   * mail spoofing for a domain (SPF, DMARC, DKIM), or subdomain takeover for names (a CNAME chain
+   * ending at a claimable service, or at nothing). For takeover, a name in scope for active work is
+   * also asked over HTTP(S), since the service's own "does not exist" page is the proof.
+   */
+  async checkDns(input: { kind: "mail"; domain: string } | { kind: "takeover"; names?: string[] }, caller: ToolCaller): Promise<RunOutcome> {
+    const passiveOk = (name: string) => this.check([name], "passive", caller.policy).decision !== "deny";
+    const names =
+      input.kind === "mail"
+        ? [input.domain.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/[:/].*$/, "").toLowerCase()]
+        : (input.names?.length ? input.names : this.engagement.query({ kind: "domain", limit: 5000 }).map((d) => String(d.attributes.fqdn))).map((n) => n.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/[:/].*$/, "").toLowerCase());
+    const allowed = [...new Set(names)].filter(passiveOk).slice(0, 300);
+    if (!allowed.length) {
+      const decision = this.check([names[0] ?? ""], "passive", caller.policy);
+      return this.deny(caller, "dnscheck", names, names, "passive", decision.decision === "deny" ? decision : { decision: "deny", code: "OUT_OF_SCOPE", reason: "no name in scope" } as never);
+    }
+    const label = input.kind === "mail" ? `mail DNS ${allowed[0]}` : `takeover DNS ×${allowed.length}`;
+    const run = this.engagement.startRun({ actor: caller.actor, origin: caller.origin, tool: "dnscheck", command: label, targets: allowed, risk: "passive", policy: { result: "allowed" }, runner: "local", attack: ["T1590.002"] });
+    const issues: Array<DnsIssue & { name: string }> = [];
+    const log: string[] = [`# ${label}`];
+    try {
+      if (input.kind === "mail") {
+        const r = await lookupMail(allowed[0]!);
+        log.push(`SPF: ${r.spf ?? "none"}${r.spfCount > 1 ? ` (+${r.spfCount - 1} more)` : ""}`, `DMARC: ${r.dmarc ?? "none"}`, `DKIM selectors found: ${r.dkimSelectors.join(", ") || "none of the common ones"}`, `MX: ${r.mx.join(", ") || "none"}`);
+        for (const i of mailIssues(r)) issues.push({ ...i, name: r.domain });
+      } else {
+        for (const name of allowed) {
+          const rec = await lookupName(name);
+          const svc = rec.cnames.length ? TAKEOVER_SERVICES.find((s) => s.cname.test(rec.cnames[rec.cnames.length - 1]!)) : undefined;
+          // The service's own "not found" page is the proof; asked only where active work is in scope.
+          if (svc?.body && rec.resolves && this.check([`https://${name}/`], "active", caller.policy).decision !== "deny") {
+            for (const scheme of ["https", "http"]) {
+              try {
+                const u = new URL(`${scheme}://${name}/`);
+                rec.body = (await sendHttp(u, { method: "GET", path: "/", headers: [["Host", u.host]], body: "" })).body.slice(0, 20_000);
+                break;
+              } catch {
+                /* next scheme */
+              }
+            }
+          }
+          if (rec.cnames.length) log.push(`${name} → ${rec.cnames.join(" → ")} (${rec.resolves ? "resolves" : "DOES NOT RESOLVE"})${svc ? ` [${svc.service}]` : ""}`);
+          const issue = takeoverIssue(rec);
+          if (issue) issues.push({ ...issue, name });
+        }
+        log.push(`${allowed.length} name(s) checked, ${allowed.filter((n) => log.some((l) => l.startsWith(`${n} →`))).length} with a CNAME`);
+      }
+      const rawId = this.engagement.putRaw(log.join("\n"), { type: "stdout", mime: "text/plain", runId: run.id });
+      const items = issues.map((i) => ({ op: "observe", title: i.title, sourceRule: `dns:${i.key}`, affects: [{ kind: "domain", key: { fqdn: i.name } }], severityHint: i.severity, detail: i.detail, rawId }));
+      const ingested = items.length ? this.engagement.ingest({ format: INGEST_FORMAT, source: { parser: "dnscheck@0.1.0", tool: "dnscheck" }, rawIds: [rawId], observedAt: new Date().toISOString(), items } as never, caller.actor) : undefined;
+      const done = this.engagement.finishRun(run.id, { status: "finished", rawIds: [rawId], summary: { checked: allowed.length, issues: issues.length, ...(ingested ? { ingested } : {}) } });
+      return { status: "dnscheck", run: done, issues, checked: allowed.length, rawId };
+    } catch (e) {
+      const done = this.engagement.finishRun(run.id, { status: "failed", summary: { error: (e as Error).message } });
+      return { status: "dnscheck", run: done, issues, error: (e as Error).message };
+    }
+  }
+
+  /**
+   * The connection itself: TLS versions and weak ciphers still accepted (hand-built handshakes, as
+   * sslscan does: OpenSSL 3 cannot even offer 3DES or RC4), the certificate, plain HTTP turned away
+   * or not, HSTS, cookie flags, CSP, framing and CORS. Each problem is an observation with the
+   * evidence; a handful of handshakes and requests, nothing past the server's first answer.
+   */
+  async checkTransport(input: { target: string; path?: string; risk: RiskLevel }, caller: ToolCaller, approvedBy?: Actor): Promise<RunOutcome> {
+    const raw = /^[a-z][a-z0-9+.-]*:\/\//i.test(input.target) ? input.target : `https://${input.target}`;
+    const given = new URL(raw);
+    const host = given.hostname.replace(/^\[|\]$/g, "");
+    const port = given.protocol === "https:" ? Number(given.port || 443) : 443;
+    const https = new URL(`https://${given.host.replace(/:\d+$/, "")}${port !== 443 ? `:${port}` : ""}${input.path ?? "/"}`);
+    const plain = new URL(`http://${host}${input.path ?? "/"}`);
+    const label = `transport ${https.origin}`;
+    const decision = this.check([https.href], input.risk, approvedBy ? { type: "human" } : caller.policy);
+    if (decision.decision === "deny") return this.deny(caller, "transport", [https.href], [https.href], input.risk, decision);
+    if (decision.decision === "ask") {
+      const grant = this.grantFor(caller, "transport", [https.origin], input.risk);
+      if (grant) return this.checkTransport(input, { ...caller, policy: { type: "human" } }, grant.by);
+      return this.requestApproval(caller, decision, label, { kind: "http", origin: https.origin, raw: `TLS handshakes (SSLv3, TLS 1.0/1.1/1.2, weak ciphers) to ${host}:${port}\r\nGET ${https.pathname} over HTTPS and plain HTTP, with test Origin headers`, risk: input.risk, probe: { tool: "transport", input } });
+    }
+    const run = this.engagement.startRun({ actor: caller.actor, origin: caller.origin, tool: "transport", command: label, targets: [https.href], risk: input.risk, policy: { result: approvedBy ? "approved" : "allowed", ...(decision.ruleId ? { ruleId: decision.ruleId } : {}) }, runner: "local", attack: ["T1595.002"] });
+    const log: string[] = [`# ${label}`];
+    const issues: TransportIssue[] = [];
+    try {
+      // TLS versions and weak cipher families.
+      const modern = await tryHandshake(host, port, "TLSv1.2", CIPHERS.broad);
+      log.push(`TLSv1.2 (broad ciphers): ${modern.accepted ? "accepted" : modern.error ?? "refused"}`);
+      for (const v of ["SSLv3", "TLSv1.0", "TLSv1.1"] as const) {
+        const r = await tryHandshake(host, port, v, CIPHERS.broad);
+        log.push(`${v}: ${r.accepted ? `ACCEPTED (cipher 0x${r.cipher!.toString(16).padStart(4, "0")})` : r.error ?? "refused"}`);
+        if (r.accepted) issues.push({ key: `tls:${v}`, severity: TLS_VERSION_SEVERITY[v], title: `${v} accepted`, detail: `${host}:${port} completes a ${v} handshake. ${v === "SSLv3" ? "SSLv3 is broken (POODLE)." : "TLS 1.0 and 1.1 are deprecated (RFC 8996) and fail PCI DSS."}` });
+      }
+      for (const fam of ["3DES", "RC4", "NULL or EXPORT"] as const) {
+        let hit: { v: string; cipher: number } | undefined;
+        for (const v of ["TLSv1.2", "TLSv1.0"] as const) {
+          const r = await tryHandshake(host, port, v, CIPHERS[fam]);
+          if (r.accepted) {
+            hit = { v, cipher: r.cipher! };
+            break;
+          }
+        }
+        log.push(`${fam} ciphers: ${hit ? `ACCEPTED (${hit.v}, 0x${hit.cipher.toString(16).padStart(4, "0")})` : "refused"}`);
+        if (hit) issues.push({ key: `cipher:${fam}`, severity: WEAK_CIPHER_SEVERITY[fam], title: `${fam} ciphers accepted`, detail: `${host}:${port} agrees to cipher 0x${hit.cipher.toString(16).padStart(4, "0")} over ${hit.v}. ${fam === "3DES" ? "3DES is vulnerable to SWEET32." : fam === "RC4" ? "RC4 is broken." : "These give no real encryption."}` });
+      }
+      const cert = await peerCertificate(host, port);
+      log.push(`certificate: ${cert.cert?.subject?.CN ?? "?"}, valid to ${cert.cert?.valid_to ?? "?"}, ${cert.authorized ? "trusted" : `not trusted (${cert.error ?? "?"})`}`);
+      issues.push(...certificateIssues(host, cert));
+      // Plain HTTP: turned away to HTTPS, or served as it is - only when port 80 is in scope too.
+      const get = (u: URL, extra: Array<[string, string]> = []) => sendHttp(u, { method: "GET", path: u.pathname + u.search, headers: [["Host", u.host], ...extra], body: "" });
+      if (this.check([plain.href], input.risk, approvedBy ? { type: "human" } : caller.policy).decision === "deny") log.push(`plain HTTP: not checked (${plain.origin} is not in scope)`);
+      else try {
+        const r = await get(plain);
+        const loc = r.headers.find(([k]) => k.toLowerCase() === "location")?.[1] ?? "";
+        const toHttps = r.status >= 300 && r.status < 400 && /^https:\/\//i.test(new URL(loc, plain.href).href);
+        log.push(`plain HTTP: ${r.status}${loc ? ` → ${loc}` : ""}`);
+        if (!toHttps && r.status < 400) issues.push({ key: "http:served", severity: "medium", title: "Served over plain HTTP without redirecting to HTTPS", detail: `GET ${plain.href} answered ${r.status}${loc ? ` → ${loc}` : ""}: the site works unencrypted, so sessions and data can be read or changed on the network.` });
+        issues.push(...cookieIssues(r.headers.filter(([k]) => k.toLowerCase() === "set-cookie").map(([, v]) => v), false).map((i) => ({ ...i, key: `http:${i.key}` })));
+      } catch (e) {
+        log.push(`plain HTTP: ${(e as Error).message}`);
+      }
+      // HTTPS: headers, cookies, CORS.
+      const r = await get(https);
+      const type = r.headers.find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "";
+      log.push(`HTTPS ${https.pathname}: ${r.status} ${type}`);
+      issues.push(...headerIssues(r.headers, /html/i.test(type)), ...cookieIssues(r.headers.filter(([k]) => k.toLowerCase() === "set-cookie").map(([, v]) => v), true));
+      for (const o of ["https://penteos-cors-check.invalid", "null"]) {
+        const c = await get(https, [["Origin", o]]);
+        const issue = corsIssue(o, c.headers);
+        log.push(`CORS Origin ${o}: ${c.headers.filter(([k]) => /^access-control-allow-(origin|credentials)$/i.test(k)).map(([k, v]) => `${k}: ${v}`).join(", ") || "no CORS headers"}`);
+        if (issue) issues.push(issue);
+      }
+      const rawId = this.engagement.putRaw(`${log.join("\n")}\n\n# HTTPS response\n${formatResponse(r).slice(0, 4000)}`, { type: "stdout", mime: "text/plain", runId: run.id });
+      const seen = new Set<string>();
+      const items = issues
+        .filter((i) => (seen.has(i.key) ? false : (seen.add(i.key), true)))
+        .map((i) => ({ op: "observe", title: `${i.title} (${https.host})`, sourceRule: `transport:${i.key}`, affects: [{ kind: "webapp", key: { origin: https.origin } }], severityHint: i.severity, detail: i.detail, rawId }));
+      const ingested = items.length ? this.engagement.ingest({ format: INGEST_FORMAT, source: { parser: "transport@0.1.0", tool: "transport" }, rawIds: [rawId], observedAt: new Date().toISOString(), items } as never, caller.actor) : undefined;
+      const done = this.engagement.finishRun(run.id, { status: "finished", rawIds: [rawId], summary: { issues: items.length, ...(ingested ? { ingested } : {}) } });
+      return { status: "transport", run: done, issues, rawId };
+    } catch (e) {
+      const done = this.engagement.finishRun(run.id, { status: "failed", summary: { error: (e as Error).message } });
+      return { status: "transport", run: done, issues, error: (e as Error).message };
+    }
+  }
 
   /**
    * Next.js server actions are endpoints in disguise: the browser posts to the page with the
@@ -2700,6 +2979,8 @@ export class ToolRunner {
       if (probe?.tool === "versions") return this.detectVersions(probe.input, as, by);
       if (probe?.tool === "browser") return this.browse(probe.input, as, by);
       if (probe?.tool === "serveractions") return this.probeServerActions(probe.input, as, by);
+      if (probe?.tool === "transport") return this.checkTransport(probe.input, as, by);
+      if (probe?.tool === "webprobe") return this.webProbe(probe.input, as, by);
       return this.runHttp(approval.request, as, by);
     }
     if (approval.request.kind === "proxy_rules") {

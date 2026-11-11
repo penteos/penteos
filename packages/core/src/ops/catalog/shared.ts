@@ -120,6 +120,42 @@ export function outcome(result: RunOutcome | undefined, ctx?: OperationContext):
           : `${r.exact ? "Exact count" : "Estimate"}: ${r.estimate} record(s)${r.highest ? `, ids up to ${r.highest}` : ""}. Make it evidence (evidence_from_raw with rawId for the log${result.sampleRawId ? ", sampleRawId for one record" : ""}) and answer the reach question (finding_answer_impact key reach). Do not read the records one by one: the measure is the proof.`,
     };
   }
+  if (result.status === "webprobe") {
+    const hits = result.hits ?? [];
+    return {
+      status: result.error ? "failed" : "done",
+      runId: result.run.id,
+      check: result.check,
+      tried: result.tried,
+      hits: hits.map((h) => `${h.severity}: ${h.title}`),
+      ...(result.rawId ? { rawId: result.rawId } : {}),
+      ...(result.error ? { error: result.error } : {}),
+      note: hits.length ? "Each hit is an observation with both exchanges as evidence. Confirm the impact (where the redirect is used, which routes the traversal reaches and without what, what the panel shows), then promote it." : result.tried ? "Nothing shown on these candidates (see rawId for each answer). Record the WSTG category as tested." : "No candidates: harvest the JavaScript first (it finds redirect parameters and screens) or pass them.",
+    };
+  }
+  if (result.status === "dnscheck") {
+    const issues = result.issues ?? [];
+    return {
+      status: result.error ? "failed" : "done",
+      runId: result.run.id,
+      ...(result.checked !== undefined ? { checked: result.checked } : {}),
+      issues: issues.map((i) => `${i.severity}: ${i.title}`),
+      ...(result.rawId ? { rawId: result.rawId } : {}),
+      ...(result.error ? { error: result.error } : {}),
+      note: issues.length ? "Each problem is an observation with the records as evidence (rawId). A possible takeover is confirmed by checking the resource name is free on that service - never by claiming it." : "Nothing to report in these records.",
+    };
+  }
+  if (result.status === "transport") {
+    const issues = result.issues ?? [];
+    return {
+      status: result.error ? "failed" : "done",
+      runId: result.run.id,
+      issues: issues.map((i) => `${i.severity}: ${i.title}`),
+      ...(result.rawId ? { rawId: result.rawId } : {}),
+      ...(result.error ? { error: result.error } : {}),
+      note: issues.length ? "Each problem is an observation with the evidence (rawId): promote the ones that matter here (old TLS and weak ciphers on a payments or login site, plain HTTP with session cookies, CORS with credentials), dismiss the rest with the reason." : "Nothing to report on the connection.",
+    };
+  }
   if (result.status === "serveractions") {
     const results = result.results ?? [];
     const by = (v: string) => results.filter((r) => r.verdict === v);
