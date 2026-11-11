@@ -2,8 +2,8 @@ import ipaddr from "ipaddr.js";
 import { cdnOf } from "../cdn.js";
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { spawnTied } from "../tied.js";
-import { mkdirSync, readFileSync, existsSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { mkdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { delimiter, dirname, join, sep } from "node:path";
 import { parseNmapXml } from "@penteos/parser-nmap";
 import { type Actor, type RiskLevel, riskExceeds, type ScopeRuleAttributes, ulid } from "@penteos/schema";
 import type { Engagement, IngestSummary, Run } from "../engagement.js";
@@ -12,6 +12,7 @@ import { analyzeNmapArgs, NMAP_PRESETS } from "./nmap.js";
 import { exploitationAllowed, setPhase } from "../plan.js";
 import { formatRequest, formatResponse, type HttpResponse, paramsOf, parseRawRequest, requestUrl, sendHttp } from "../http.js";
 import { harvestScript, type JsHarvest, mergeHarvests, scriptUrls } from "../webjs.js";
+import { type DeepSignals, deepSignals, jsReferences, mergeSignals, recoverSources, safeSourcePath, sourceMapUrl } from "../webjs-deep.js";
 import { offlineSandbox } from "../sandbox.js";
 import { parseApiSpec, samplePath } from "../apispec.js";
 import { INGEST_FORMAT, naturalKeyFor } from "@penteos/schema";
@@ -204,7 +205,27 @@ export type ProbeRequest =
   | { tool: "ratelimit"; input: { origin: string; raw: string; more?: string[]; attempts?: number; risk: RiskLevel } }
   | { tool: "enumeration"; input: EnumerationInput }
   | { tool: "versions"; input: { origin: string; slugs?: string[]; risk: RiskLevel } }
-  | { tool: "browser"; input: { action: BrowseAction; risk: RiskLevel } };
+  | { tool: "browser"; input: { action: BrowseAction; risk: RiskLevel } }
+  | { tool: "serveractions"; input: ServerActionsInput };
+
+export interface ServerActionsInput {
+  origin: string;
+  /** The page the actions belong to (they are posted to it); "/" by default. */
+  page?: string;
+  /** A session to call them with (a lower role's cookie, as {{secret:name}}); none by default. */
+  header?: string;
+  /** Only these action ids; all the ones the bundles revealed by default. */
+  ids?: string[];
+  risk: RiskLevel;
+}
+
+export interface ServerActionResult {
+  id: string;
+  name?: string;
+  status: number;
+  /** ran: the server executed it; protected: refused or sent to login; failed: errored on this input; missing: unknown id. */
+  verdict: "ran" | "protected" | "failed" | "missing";
+}
 
 /**
  * "Allow during this session": the same tool against the same targets, up to the same risk,
@@ -273,6 +294,7 @@ export type RunOutcome =
   | { status: "harvest"; apiBases?: HarvestApiBase[]; pageOrigin?: string; run: Run; harvest?: JsHarvest; rawId?: string; error?: string }
   | { status: "apispec"; run: Run; routes?: Array<{ path: string; methods: string[]; requiresAuth?: boolean }>; title?: string; rawId?: string; error?: string }
   | { status: "ratelimit"; run: Run; attempts: number; defence?: string; results?: RateLimitResult[]; rawId?: string; error?: string }
+  | { status: "serveractions"; run: Run; results?: ServerActionResult[]; rawId?: string; error?: string }
   | { status: "enumeration"; run: Run; result?: EnumerationResult; rawId?: string; sampleRawId?: string; error?: string }
   | { status: "versions"; run: Run; found?: Array<{ product: string; version: string; source: string; confidence: number; ecosystem?: string }>; rawId?: string; error?: string }
   | { status: "probe"; run: Run; basePath?: string; baseTrials?: Array<{ basePath: string; exist: number; of: number }>; results?: Array<{ path: string; noAuth?: number; size?: number; withHeader?: number }>; open?: string[]; modeStatus?: number; rawId?: string; error?: string }
@@ -792,14 +814,15 @@ export class ToolRunner {
       return this.requestApproval(caller, decision, label, { kind: "http", origin: page.origin, raw: `GET ${page.pathname} HTTP/1.1\r\nHost: ${page.host}`, risk: input.risk, probe: { tool: "webjs", input } });
     }
     const run = this.engagement.startRun({ actor: caller.actor, origin: caller.origin, tool: "webjs", command: label, targets: [page.href], risk: input.risk, policy: { result: approvedBy ? "approved" : "allowed", ...(decision.ruleId ? { ruleId: decision.ruleId } : {}) }, runner: "local", attack: ["T1595"] });
-    const get = async (u: URL): Promise<string | undefined> => {
+    const fetchOk = async (u: URL): Promise<{ body: string; headers: Array<[string, string]> } | undefined> => {
       try {
         const r = await sendHttp(u, { method: "GET", path: u.pathname + u.search, headers: [["Host", u.host]], body: "" });
-        return r.status < 400 ? r.body : undefined;
+        return r.status < 400 ? { body: r.body, headers: r.headers } : undefined;
       } catch {
         return undefined;
       }
     };
+    const get = async (u: URL): Promise<string | undefined> => (await fetchOk(u))?.body;
     const inScope = (u: URL) => this.check([u.href], "passive", { type: "human" }).decision !== "deny";
     try {
       const html = await get(page);
@@ -808,17 +831,84 @@ export class ToolRunner {
       let urls = (input.scripts ?? (html ? scriptUrls(html, page.href) : [])).map((u) => new URL(u, page.href));
       if (!urls.length && /\.(m?js)(\?|$)/i.test(page.pathname)) urls = [page];
       const skippedOffScope = urls.filter((u) => !inScope(u)).map((u) => u.host);
-      urls = urls.filter(inScope).slice(0, input.maxScripts ?? 25);
-      const harvests: JsHarvest[] = [];
-      const read: string[] = [];
-      for (const u of urls) {
-        const code = u.href === page.href ? html : await get(u);
-        if (code) {
-          harvests.push(harvestScript(code));
-          read.push(u.href);
+      // Every script, not only the page's: each one read is searched for the chunks and manifests it
+      // names (Next.js, Vite, webpack), followed while they stay in scope; politely (the WAF) and
+      // within limits. Each file is kept in the project (work/js/<host>/), with its source map's
+      // original files when the site serves them, so it can be searched later.
+      const maxFiles = Math.min(input.maxScripts ?? 200, 400);
+      const MAX_BYTES = 60 * 1024 * 1024;
+      const jsDir = join(this.workDir(), "js", page.host.replace(/[^A-Za-z0-9.-]/g, "_"));
+      const save = (rel: string, content: string) => {
+        try {
+          const file = join(jsDir, rel);
+          if (!file.startsWith(jsDir + sep)) return undefined;
+          mkdirSync(dirname(file), { recursive: true });
+          writeFileSync(file, content, { mode: 0o600 });
+          return file;
+        } catch {
+          return undefined;
         }
+      };
+      const queue = [...urls.filter(inScope), ...(html ? jsReferences(html, page.href).map((u) => new URL(u)) : [])];
+      const seen = new Set<string>();
+      const harvests: JsHarvest[] = [];
+      const signals: DeepSignals[] = [];
+      const read: string[] = [];
+      const maps: string[] = [];
+      let bytes = 0;
+      while (queue.length && read.length < maxFiles && bytes < MAX_BYTES) {
+        const u = queue.shift()!;
+        if (seen.has(u.href)) continue;
+        seen.add(u.href);
+        if (!inScope(u)) {
+          skippedOffScope.push(u.host);
+          continue;
+        }
+        const got = u.href === page.href && html ? { body: html, headers: [] as Array<[string, string]> } : await fetchOk(u);
+        if (!got) continue;
+        bytes += got.body.length;
+        read.push(u.href);
+        const rel = safeSourcePath(`bundles${u.pathname}`);
+        save(rel, got.body);
+        harvests.push(harvestScript(got.body));
+        signals.push(deepSignals(got.body, rel));
+        for (const next of jsReferences(got.body, u.href)) if (!seen.has(next)) queue.push(new URL(next));
+        const map = sourceMapUrl(got.body, got.headers, u.href) ?? `${u.href.split("?")[0]}.map`;
+        if (!maps.includes(map)) maps.push(map);
+        if (queue.length) await new Promise((r) => setTimeout(r, 120));
       }
-      if (html && urls.every((u) => u.href !== page.href)) harvests.push(harvestScript(html)); // inline scripts too
+      if (html && !read.includes(page.href)) harvests.push(harvestScript(html)); // inline scripts too
+      // Source maps: the original code, file by file, when the site serves them.
+      const recovered: string[] = [];
+      let mapsServed = 0;
+      for (const m of maps.slice(0, maxFiles)) {
+        if (bytes >= MAX_BYTES) break;
+        let mu: URL;
+        try {
+          mu = new URL(m);
+        } catch {
+          continue;
+        }
+        if (!inScope(mu)) continue;
+        const got = await fetchOk(mu);
+        const sources = got ? recoverSources(got.body) : undefined;
+        if (!got || !sources) continue;
+        mapsServed++;
+        bytes += got.body.length;
+        for (const src of sources) {
+          const rel = `sources/${src.path}`;
+          if (!save(rel, src.content)) continue;
+          recovered.push(rel);
+          // The application's own code is read; the libraries' (node_modules) only kept.
+          if (!/(^|\/)node_modules\//.test(src.path)) {
+            harvests.push(harvestScript(src.content));
+            signals.push(deepSignals(src.content, rel));
+          } else signals.push(deepSignals(src.content, rel));
+        }
+        await new Promise((r) => setTimeout(r, 120));
+      }
+      const deep = mergeSignals(signals);
+      if (read.length || recovered.length) save("index.json", JSON.stringify({ page: page.href, scripts: read, sourceMaps: maps.slice(0, mapsServed ? undefined : 0), recovered: recovered.length, at: new Date().toISOString() }, null, 2));
       const h = mergeHarvests(harvests);
       const rawId = this.engagement.putRaw(`# harvest ${page.href}\nscripts read:\n${read.join("\n")}\n\nendpoints:\n${h.endpoints.map((e) => `${e.origin ?? ""}${e.path}`).join("\n")}\n\nhosts:\n${h.hosts.join("\n")}\n\nroutes:\n${h.routes.join("\n")}\n\nsecrets:\n${h.secrets.map((x) => `${x.kind}: ${x.value}`).join("\n")}`, { type: "stdout", mime: "text/plain", runId: run.id });
 
@@ -857,11 +947,30 @@ export class ToolRunner {
       for (const sec of h.secrets.slice(0, 20)) {
         items.push({ op: "observe", title: `Possible ${sec.kind} in client JavaScript`, sourceRule: "webjs:secret", affects: [{ kind: "webapp", key: { origin: page.origin } }], severityHint: "medium", detail: `${sec.kind}: ${this.engagement.redact(sec.value)}` });
       }
-      if (h.sourceMaps.length) {
-        items.push({ op: "observe", title: `Source maps referenced (${h.sourceMaps.length}): the original source may be downloadable`, sourceRule: "webjs:sourcemap", affects: [{ kind: "webapp", key: { origin: page.origin } }], severityHint: "low", detail: h.sourceMaps.join(", ") });
+      const app = [{ kind: "webapp", key: { origin: page.origin } }];
+      if (recovered.length) {
+        const own = recovered.filter((r) => !/(^|\/)node_modules\//.test(r));
+        items.push({ op: "observe", title: `Source code exposed through source maps: ${recovered.length} original files recovered (${own.length} of the application's own)`, sourceRule: "webjs:sources-exposed", affects: app, severityHint: "medium", detail: `The site serves its source maps with the original code inside. Copied to ${jsDir}/sources (search it: comments, internal names, routes, logic). Application files include: ${own.slice(0, 15).join(", ")}` });
+      } else if (h.sourceMaps.length) {
+        items.push({ op: "observe", title: `Source maps referenced (${h.sourceMaps.length}), not served`, sourceRule: "webjs:sourcemap", affects: app, severityHint: "info", detail: h.sourceMaps.join(", ") });
+      }
+      const byKind = new Map<string, string[]>();
+      for (const c of deep.config) byKind.set(c.kind, [...(byKind.get(c.kind) ?? []), c.value]);
+      for (const [kind, values] of byKind) items.push({ op: "observe", title: `Client JavaScript ships ${kind} configuration`, sourceRule: "webjs:config", affects: app, severityHint: "low", detail: `${[...new Set(values)].slice(0, 6).map((v) => this.engagement.redact(v)).join(", ")}. Check what it allows (an error tracker accepting events, a bucket listing, a backend reachable directly).` });
+      if (deep.internalAddresses.length) items.push({ op: "observe", title: `JavaScript names internal addresses: ${deep.internalAddresses.slice(0, 5).join(", ")}`, sourceRule: "webjs:internal", affects: app, severityHint: "low", detail: deep.internalAddresses.join(", ") });
+      for (const l of deep.messageListeners.filter((x) => !x.checksOrigin).slice(0, 5)) items.push({ op: "observe", title: `Message listener without an origin check in ${l.file}`, sourceRule: "lead:postmessage", affects: app, severityHint: "medium", detail: `window.addEventListener("message", …) with no check of event.origin nearby: any page that frames or opens this one can send it messages. Read what the handler does with the data (${jsDir}/${l.file}).` });
+      if (deep.redirectParams.length) items.push({ op: "observe", title: `Redirect parameters in the code: ${deep.redirectParams.slice(0, 6).join(", ")}`, sourceRule: "lead:redirect", affects: app, severityHint: "info", detail: "Parameters that say where to go next: test each one for open redirect (an external URL, //host, /\\host, encoded forms) on the screens and endpoints that take it." });
+      if (deep.clientFields.length) items.push({ op: "observe", title: `Fields the browser computes and sends: ${deep.clientFields.slice(0, 6).join(", ")}`, sourceRule: "lead:client-trust", affects: app, severityHint: "info", detail: "Values the client computes (IP, time zone, device, fingerprint, risk) can be sent with anything. Find the requests that carry them and check whether the server trusts them (fraud signals, limits, geofencing)." });
+      if (deep.sinks.length) items.push({ op: "observe", title: `DOM sinks in the application's code: ${[...new Set(deep.sinks.map((x) => x.kind))].join(", ")}`, sourceRule: "webjs:sinks", affects: app, severityHint: "info", detail: deep.sinks.slice(0, 20).map((x) => `${x.kind} in ${x.file}`).join("; ") });
+      if (deep.serverActions.length) {
+        const all = this.engagement.getState<Record<string, Array<{ id: string; name?: string; file: string }>>>("serverActions") ?? {};
+        all[canonicalOrigin(page.origin)] = deep.serverActions;
+        this.engagement.setState("serverActions", all);
+        const named = deep.serverActions.filter((a) => a.name).map((a) => a.name!);
+        items.push({ op: "observe", title: `${deep.serverActions.length} Next.js server action(s) in the bundles${named.length ? `: ${named.slice(0, 6).join(", ")}` : ""}`, sourceRule: "lead:server-actions", affects: app, severityHint: "info", detail: "Server actions are endpoints: each one runs on the server when called with its id (Next-Action header). Probe them without a session and with a lower role (web_probe_server_actions)." });
       }
       const ingested = items.length ? this.engagement.ingest({ format: INGEST_FORMAT, source: { parser: "webjs@0.1.0", tool: "webjs" }, rawIds: [rawId], observedAt: new Date().toISOString(), items } as never, caller.actor) : undefined;
-      const summary = { endpoints: h.endpoints.length, hosts: h.hosts.length, routes: h.routes.length, secrets: h.secrets.length, sourceMaps: h.sourceMaps.length, scriptsRead: read.length, ...(ingested ? { ingested } : {}) };
+      const summary = { endpoints: h.endpoints.length, hosts: h.hosts.length, routes: h.routes.length, secrets: h.secrets.length, sourceMaps: h.sourceMaps.length, scriptsRead: read.length, sourceFilesRecovered: recovered.length, serverActions: deep.serverActions.length, savedIn: jsDir, ...(ingested ? { ingested } : {}) };
       const done = this.engagement.finishRun(run.id, { status: "finished", rawIds: [rawId], summary });
       this.engagement.noteReachability(page.hostname, true);
       // Remembered: when an out-of-scope API base is included later, the agent is told to sweep it.
@@ -1141,6 +1250,72 @@ export class ToolRunner {
   // -------------------------------------------------------------------------------------------
   // Rate limiting
   // -------------------------------------------------------------------------------------------
+
+  /**
+   * Next.js server actions are endpoints in disguise: the browser posts to the page with the
+   * action's id in a Next-Action header, and the server runs the function. The bundles name them
+   * (web_harvest_scripts); this calls each one with no arguments, without a session (or with a
+   * lower role's), and says which ran, which refused, which failed on the input and which are gone.
+   * Calling an action may change data (it is what they are for): intrusive, approved like one.
+   */
+  async probeServerActions(input: ServerActionsInput, caller: ToolCaller, approvedBy?: Actor): Promise<RunOutcome> {
+    let base: URL;
+    try {
+      base = new URL(input.page ?? "/", input.origin);
+    } catch {
+      throw new Error(`not a URL: ${input.origin}`);
+    }
+    const known = this.engagement.getState<Record<string, Array<{ id: string; name?: string }>>>("serverActions")?.[canonicalOrigin(base.origin)] ?? [];
+    const actions = (input.ids?.length ? input.ids.map((id) => known.find((a) => a.id === id) ?? { id }) : known).slice(0, 300);
+    if (!actions.length) throw new Error("no server actions known for this origin: run web_harvest_scripts on its pages first (or pass ids)");
+    const label = `server actions ${base.origin}${base.pathname} ×${actions.length}${input.header ? " (with a session)" : ""}`;
+    const decision = this.check([base.href], input.risk, approvedBy ? { type: "human" } : caller.policy);
+    if (decision.decision === "deny") return this.deny(caller, "serveractions", [base.href], [base.href], input.risk, decision);
+    if (decision.decision === "ask") {
+      const grant = this.grantFor(caller, "serveractions", [base.origin], input.risk);
+      if (grant) return this.probeServerActions(input, { ...caller, policy: { type: "human" } }, grant.by);
+      return this.requestApproval(caller, decision, label, { kind: "http", origin: base.origin, raw: `POST ${base.pathname} HTTP/1.1\r\nHost: ${base.host}\r\nNext-Action: ${actions[0]!.id}\r\n\r\n[]\r\n\r\n[+ ${actions.length - 1} more actions, each called once with no arguments]`, risk: input.risk, probe: { tool: "serveractions", input } });
+    }
+    const run = this.engagement.startRun({ actor: caller.actor, origin: caller.origin, tool: "serveractions", command: label, targets: [base.href], risk: input.risk, policy: { result: approvedBy ? "approved" : "allowed", ...(decision.ruleId ? { ruleId: decision.ruleId } : {}) }, runner: "local", attack: ["T1190"] });
+    const resolved = input.header ? this.engagement.resolveSecrets([input.header]) : undefined;
+    if (resolved?.missing.length) throw new Error(`Unknown secret(s): ${resolved.missing.join(", ")}. Save them first with secret_save.`);
+    const extra = resolved ? (() => {
+      const h = resolved.argv[0]!;
+      const i = h.indexOf(":");
+      return i > 0 ? [[h.slice(0, i).trim(), h.slice(i + 1).trim()] as [string, string]] : [];
+    })() : [];
+    const results: ServerActionResult[] = [];
+    const lines = [`# ${label}`];
+    try {
+      for (const a of actions) {
+        const res = await sendHttp(base, { method: "POST", path: base.pathname + base.search, headers: [["Host", base.host], ["Next-Action", a.id], ["Accept", "text/x-component"], ["Content-Type", "text/plain;charset=UTF-8"], ...extra], body: "[]" });
+        const body = res.body.slice(0, 2000);
+        const verdict: ServerActionResult["verdict"] =
+          res.status === 404 || /server action not found|failed to find server action/i.test(body) ? "missing"
+          : res.status === 401 || res.status === 403 || /x-action-redirect/i.test(res.headers.map(([k]) => k).join(" ")) && /login|sign-?in|auth/i.test(res.headers.map(([, v]) => v).join(" ")) || /unauthori[sz]ed|forbidden|no autorizado|not authenticated|sesi[oó]n/i.test(body) ? "protected"
+          : res.status >= 500 ? "failed"
+          : "ran";
+        results.push({ id: a.id, ...(a.name ? { name: a.name } : {}), status: res.status, verdict });
+        lines.push(`${a.id}\t${a.name ?? ""}\t${res.status}\t${verdict}\t${body.replace(/\s+/g, " ").slice(0, 200)}`);
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      const rawId = this.engagement.putRaw(lines.join("\n"), { type: "stdout", mime: "text/plain", runId: run.id });
+      const ran = results.filter((r) => r.verdict === "ran");
+      const items: unknown[] = [];
+      for (const r of ran.slice(0, 40)) {
+        items.push({ op: "observe", title: `Server action ${r.name ?? r.id.slice(0, 12)} runs ${input.header ? "with a lower role's session" : "without a session"} (${r.status})`, sourceRule: "serveractions:ran", affects: [{ kind: "webapp", key: { origin: base.origin } }], severityHint: "medium", detail: `POST ${base.pathname} with Next-Action: ${r.id} and no arguments answered ${r.status}${input.header ? " with the session given" : " with no session"}. Read what it returned (rawId) and what the action does: if it reads or changes data it should not for this caller, it is a finding.`, rawId });
+      }
+      for (const r of results.filter((x) => x.verdict === "failed").slice(0, 10)) {
+        items.push({ op: "observe", ...leadFor(r.status, `server action ${r.name ?? r.id.slice(0, 12)}`)!, affects: [{ kind: "webapp", key: { origin: base.origin } }], severityHint: "info", rawId });
+      }
+      if (items.length) this.engagement.ingest({ format: INGEST_FORMAT, source: { parser: "serveractions@0.1.0", tool: "serveractions" }, rawIds: [rawId], observedAt: new Date().toISOString(), items } as never, caller.actor);
+      const done = this.engagement.finishRun(run.id, { status: "finished", rawIds: [rawId], summary: { actions: results.length, ran: ran.length, protected: results.filter((r) => r.verdict === "protected").length, failed: results.filter((r) => r.verdict === "failed").length, missing: results.filter((r) => r.verdict === "missing").length } });
+      return { status: "serveractions", run: done, results, rawId };
+    } catch (e) {
+      const done = this.engagement.finishRun(run.id, { status: "failed", summary: { error: (e as Error).message, results } });
+      return { status: "serveractions", run: done, results, error: (e as Error).message };
+    }
+  }
 
   /**
    * A defence seen on an endpoint (a 429 or 423 from any request: the rate-limit probe, a fuzz, a
@@ -2524,6 +2699,7 @@ export class ToolRunner {
       if (probe?.tool === "enumeration") return this.measureEnumeration(probe.input, as, by);
       if (probe?.tool === "versions") return this.detectVersions(probe.input, as, by);
       if (probe?.tool === "browser") return this.browse(probe.input, as, by);
+      if (probe?.tool === "serveractions") return this.probeServerActions(probe.input, as, by);
       return this.runHttp(approval.request, as, by);
     }
     if (approval.request.kind === "proxy_rules") {

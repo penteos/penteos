@@ -120,6 +120,23 @@ export function outcome(result: RunOutcome | undefined, ctx?: OperationContext):
           : `${r.exact ? "Exact count" : "Estimate"}: ${r.estimate} record(s)${r.highest ? `, ids up to ${r.highest}` : ""}. Make it evidence (evidence_from_raw with rawId for the log${result.sampleRawId ? ", sampleRawId for one record" : ""}) and answer the reach question (finding_answer_impact key reach). Do not read the records one by one: the measure is the proof.`,
     };
   }
+  if (result.status === "serveractions") {
+    const results = result.results ?? [];
+    const by = (v: string) => results.filter((r) => r.verdict === v);
+    return {
+      status: result.error ? "failed" : "done",
+      runId: result.run.id,
+      ran: by("ran").map((r) => r.name ?? r.id),
+      protected: by("protected").length,
+      failed: by("failed").map((r) => r.name ?? r.id),
+      missing: by("missing").length,
+      ...(result.rawId ? { rawId: result.rawId } : {}),
+      ...(result.error ? { error: result.error } : {}),
+      note: by("ran").length
+        ? "Each action that ran is an observation: read its answer (rawId) and what it does; promote the ones that read or change what this caller should not reach. Failed ones are leads: vary the arguments."
+        : "None ran for this caller.",
+    };
+  }
   if (result.status === "ratelimit") {
     const results = result.results ?? [];
     const open = results.filter((r) => r.verdict === "no_defence");

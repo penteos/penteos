@@ -41,7 +41,7 @@ defineOperation({
   name: "web.harvest_scripts",
   title: "Harvest a web app's JavaScript",
   description:
-    "Fetches a page and the JavaScript it loads, and pulls out what the application leaks in its own code: the API endpoints it calls, the hosts of other environments (staging, internal APIs), its routes (admin panel, portal) and credentials left in the bundle. In-scope endpoints and apps are added to the graph to test next; out-of-scope hosts, secrets and source maps become observations. This is usually the first thing to do on a single-page app: its whole API surface ships in the bundle. Pass the page URL (or explicit script URLs). Only in-scope URLs are fetched.",
+    "Fetches a page and ALL of its JavaScript - not only the scripts in the HTML: every chunk, dynamic import and Next.js build manifest the code names is followed (in scope, politely) - and each source map the site serves, recovering the original files. Everything is kept in the project (work/js/<host>/: bundles/, sources/, index.json) so you can search it with run_exec (grep, no targets). It pulls out the API endpoints, hosts of other environments, routes, credentials and shipped configuration (error tracker DSNs, buckets, backends), internal addresses, message listeners without an origin check, DOM sinks, redirect parameters, fields the browser computes and sends, and Next.js server actions. Leads it opens (redirects, client-computed fields, server actions, message listeners) must be looked at before the round closes. Run it on every web application in scope, and on its login and admin pages: each screen loads its own chunks.",
   kind: "target",
   actors: ["human", "agent"],
   input: z.object({
@@ -49,7 +49,7 @@ defineOperation({
     url: z.string().url().describe("The page to start from (its scripts are discovered), or a bundle URL directly"),
     scripts: z.array(z.string().url()).optional().describe("Explicit script URLs instead of discovering them from the page"),
     risk: RiskLevel.default("active"),
-    maxScripts: z.number().int().min(1).max(60).optional(),
+    maxScripts: z.number().int().min(1).max(400).optional().describe("How many script files to read at most (default 200)"),
   }),
   handler: async (input, ctx) => {
     let result: RunOutcome;
@@ -152,6 +152,33 @@ defineOperation({
     if (!app || app.kind !== "webapp") throw new OperationError("NOT_FOUND", `webapp ${input.webappId} not found`);
     const cov = (app.attributes.coverage ?? {}) as Record<string, unknown>;
     return WSTG.map((c) => ({ ...c, ...((cov[c.id] as object) ?? { status: "untested" }) }));
+  },
+});
+
+defineOperation({
+  name: "web.probe_server_actions",
+  title: "Probe Next.js server actions",
+  description:
+    "Calls each Next.js server action the bundles revealed (web_harvest_scripts) once, with no arguments: without a session by default, or with a lower role's session (header, e.g. 'Cookie: {{secret:user_session}}'). Says which ran, which refused, which failed on the input (leads) and which no longer exist. Post them to the page they belong to (page: '/es/login', '/dashboard'). Calling an action can change data: it is intrusive and asks for approval; prefer a test environment or test accounts.",
+  kind: "target",
+  actors: ["human", "agent"],
+  input: z.object({
+    engagementId,
+    origin: z.string().url(),
+    page: z.string().optional().describe("The page path the actions are posted to (default /)"),
+    header: z.string().optional().describe("A session to call them with, as a header line: 'Cookie: {{secret:name}}'"),
+    ids: z.array(z.string().regex(/^[0-9a-f]{40,42}$/)).max(300).optional(),
+    risk: RiskLevel.default("intrusive"),
+  }),
+  handler: async (input, ctx) => {
+    let result: RunOutcome;
+    try {
+      result = await ctx.runner(input.engagementId).probeServerActions({ origin: input.origin, ...(input.page ? { page: input.page } : {}), ...(input.header ? { header: input.header } : {}), ...(input.ids?.length ? { ids: input.ids } : {}), risk: input.risk }, { ...ctx.caller, origin: ctx.caller.actor.type === "agent" ? "agent_tool" : "runner" });
+    } catch (e) {
+      if (e instanceof OperationError) throw e;
+      throw new OperationError("VALIDATION_ERROR", (e as Error).message);
+    }
+    return outcome(result, ctx);
   },
 });
 
