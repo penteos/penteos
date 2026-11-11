@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Caller, type Engagement, executeOperation, type OperationContext, setPhase, ToolRegistry, ToolRunner, Workspace } from "../src/index.js";
+import { WSTG } from "../src/wstg.js";
 
 /** Testing deeper without credentials: rate limits, and not closing the analysis with easy tests left. */
 
@@ -94,6 +95,9 @@ it("closing the analysis lists the tests that needed no credentials and were not
     HUMAN.actor,
   );
   setPhase(eng, "analysis", HUMAN.actor);
+  // Every category said for (here: partial, with why), so the depth gaps are what is left on the card.
+  const app = eng.query({ kind: "webapp" }).find((a) => !a.outOfScope)!;
+  await executeOperation("webapp.set_coverage", { webappId: app.id, categories: WSTG.map((c) => c.id), status: "partial", note: "sin cuenta de prueba" }, ctx(MAESTRO));
   const r = (await executeOperation("phase.request", { to: "exploitation", summary: "Listo" }, ctx(MAESTRO))) as { note: string };
   const warnings = runner.listApprovals()[0]!.warnings.join(" | ");
   for (const gap of ["JavaScript sin analizar", "5 endpoint(s) conocidos sin pedir nunca", "frontera de autenticación sin barrer", "login sin prueba de límite de intentos"]) expect(warnings).toContain(gap);

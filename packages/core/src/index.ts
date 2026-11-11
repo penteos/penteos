@@ -73,3 +73,4 @@ export { type PluginTrust } from "./plugins/host.js";
 export { pluginProxyHooks, composeProxyHooks, hookMatches, applyRequestChange, applyResponseChange } from "./plugins/proxy-hooks.js";
 export { ParallelClient, ResearchError, PARALLEL_URL, type WebResult, type FetchedPage } from "./research/parallel.js";
 export { useResearchClient, useGithubFetch, RESEARCH_LIMITS } from "./ops/catalog/research.js";
+export { outOfScopeSurface, undecidedSurface, surfaceDecisions, recordSurfaceDecision, type SurfaceAsset } from "./surface.js";

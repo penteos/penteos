@@ -57,7 +57,7 @@ describe("rules of engagement", () => {
 });
 
 describe("coverage", () => {
-  it("the matrix shows every application, and closing the analysis with gaps warns the operator", async () => {
+  it("the matrix shows every application, and the analysis does not close with categories nobody looked at", async () => {
     eng.ingest({ format: "penteos.ingest/v0", source: { parser: "test@0.1", tool: "test" }, rawIds: [], observedAt: new Date().toISOString(), items: [{ op: "upsert", kind: "webapp", key: { origin: "https://app.lab" }, confidence: 1 }] } as never, HUMAN.actor);
     const app = eng.query({ kind: "webapp" })[0]!;
     await executeOperation("webapp.set_coverage", { webappId: app.id, category: "ATHN", status: "tested" }, ctx(MAESTRO));
@@ -67,9 +67,13 @@ describe("coverage", () => {
     expect(m.apps[0]!.coverage.find((c) => c.id === "INPV")!.status).toBe("untested");
 
     setPhase(eng, "analysis", HUMAN.actor);
-    const r = (await executeOperation("phase.request", { to: "exploitation", summary: "Listo" }, ctx(MAESTRO))) as { note?: string };
-    expect(r.note).toMatch(/11 de 12 categorías sin cubrir/);
-    expect(runner.listApprovals()[0]!.warnings[0]).toMatch(/https:\/\/app\.lab: 11 de 12 categorías sin cubrir/);
+    await expect(executeOperation("phase.request", { to: "exploitation", summary: "Listo" }, ctx(MAESTRO))).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: expect.stringMatching(/WSTG categories still untested: https:\/\/app\.lab .*INPV/) });
+    // Not testing is fine when it is said, with why: then the round may close.
+    const rest = m.apps[0]!.coverage.filter((c) => c.status === "untested").map((c) => c.id);
+    await expect(executeOperation("webapp.set_coverage", { webappId: app.id, categories: rest, status: "partial" }, ctx(MAESTRO))).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await executeOperation("webapp.set_coverage", { webappId: app.id, categories: rest, status: "partial", note: "sin cuenta de prueba" }, ctx(MAESTRO));
+    const r = (await executeOperation("phase.request", { to: "exploitation", summary: "Listo" }, ctx(MAESTRO))) as { status: string };
+    expect(r.status).toBe("pending_approval");
   });
 });
 

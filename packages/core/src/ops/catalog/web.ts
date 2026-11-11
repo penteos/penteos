@@ -159,13 +159,14 @@ defineOperation({
   name: "webapp.set_coverage",
   title: "Record OWASP coverage",
   description:
-    "Records the state of an OWASP WSTG category on a web application: in_progress, tested (nothing found), partial (tested, but not all of it could be done), vulnerable (link the finding in the note) or n/a. Update it as you test, so the operator and the report show what was covered. If a tool gap affects that category on that app, 'tested' is recorded as 'partial' with the reason: the coverage never claims what a missing tool kept from being done.",
+    "Records the state of an OWASP WSTG category (or several at once with categories) on a web application: in_progress, tested (nothing found), partial (tested, but not all of it could be done: say why in the note, e.g. 'no test account'), vulnerable (link the finding in the note) or n/a (with the reason). Update it as you test, so the operator and the report show what was covered. If a tool gap affects that category on that app, 'tested' is recorded as 'partial' with the reason: the coverage never claims what a missing tool kept from being done.",
   kind: "write",
   actors: ["human", "agent"],
   input: z.object({
     engagementId,
     webappId: z.string(),
-    category: z.enum(WSTG.map((c) => c.id) as [string, ...string[]]),
+    category: z.enum(WSTG.map((c) => c.id) as [string, ...string[]]).optional(),
+    categories: z.array(z.enum(WSTG.map((c) => c.id) as [string, ...string[]])).max(20).optional(),
     status: z.enum(["untested", "in_progress", "tested", "partial", "vulnerable", "n/a"]),
     note: z.string().optional(),
   }),
@@ -173,16 +174,20 @@ defineOperation({
     const e = ctx.engagement(input.engagementId);
     const app = e.get(input.webappId);
     if (!app || app.kind !== "webapp") throw new OperationError("NOT_FOUND", `webapp ${input.webappId} not found`);
-    // "Tested" while a tool gap affects this category on this app is "partial", with the reason.
+    const categories = [...new Set([...(input.category ? [input.category] : []), ...(input.categories ?? [])])];
+    if (!categories.length) throw new OperationError("VALIDATION_ERROR", "pass category or categories");
+    // Not tested, partly or not at all, is said with why: the report and the client read it.
+    if (ctx.caller.actor.type === "agent" && (input.status === "partial" || input.status === "n/a") && !input.note?.trim()) throw new OperationError("VALIDATION_ERROR", `${input.status} needs a note saying why (e.g. "no test account", "no login on this app")`);
     const lang = e.info.language ?? "en";
-    const limiting = input.status === "tested" ? gapsLimiting(e, String(app.attributes.origin), input.category) : [];
-    const status = limiting.length ? "partial" : input.status;
-    const why = limiting.map((g) => gapLine(g, lang)).join(" · ");
-    const note = [input.note, why && (lang === "en" ? `Partial: ${why}` : `Parcial: ${why}`)].filter(Boolean).join("\n");
-    const coverage = {
-      ...((app.attributes.coverage ?? {}) as Record<string, unknown>),
-      [input.category]: { status, ...(note ? { note } : {}), by: ctx.caller.name ?? ctx.caller.actor.type, at: new Date().toISOString() },
-    };
+    const coverage: Record<string, unknown> = { ...((app.attributes.coverage ?? {}) as Record<string, unknown>) };
+    for (const category of categories) {
+      // "Tested" while a tool gap affects this category on this app is "partial", with the reason.
+      const limiting = input.status === "tested" ? gapsLimiting(e, String(app.attributes.origin), category) : [];
+      const status = limiting.length ? "partial" : input.status;
+      const why = limiting.map((g) => gapLine(g, lang)).join(" · ");
+      const note = [input.note, why && (lang === "en" ? `Partial: ${why}` : `Parcial: ${why}`)].filter(Boolean).join("\n");
+      coverage[category] = { status, ...(note ? { note } : {}), by: ctx.caller.name ?? ctx.caller.actor.type, at: new Date().toISOString() };
+    }
     return e.editEntity(app.id, { coverage }, ctx.caller.actor);
   },
 });

@@ -1,4 +1,5 @@
 import { WSTG, wstgTitle } from "../../wstg.js";
+import { undecidedSurface } from "../../surface.js";
 import type { OperationContext } from "../registry.js";
 import { gapLine, isCritical, listGaps } from "../../tools/capabilities.js";
 import { defineOperation, OperationError } from "../registry.js";
@@ -99,6 +100,8 @@ defineOperation({
         `This phase cannot close yet: its central work has no source at all - ${critical.map((g) => `gap ${g.id}: ${gapLine(g, "en")}`).join("; ")}. The install was proposed to the operator; keep doing whatever else you can, and when nothing is left, tell the operator in one line what is missing and wait. Do not ask for the phase again until the gap is resolved or the operator moves on.`,
       );
     }
+    const blocked = closingBlockers(e);
+    if (blocked) throw new OperationError("VALIDATION_ERROR", blocked);
     if (plan.current) setPhaseSummary(e, plan.current, input.summary, ctx.caller.actor);
     // Leaving the analysis with categories nobody looked at is a decision the operator makes knowingly.
     const warnings: string[] = [];
@@ -150,10 +153,49 @@ const IMPACT_LABEL: Record<"es" | "en", Record<string, string>> = {
 };
 
 /** High-signal observations nobody acted on: not promoted to a finding and not dismissed. */
+/** Phases where the analysis is underway or done: from then on every WSTG category needs a state. */
+const ANALYSIS_OR_LATER = new Set(["analysis", "exploitation", "verification"]);
+
+/**
+ * What keeps a round (or a phase) from closing, as one message for the agent, or undefined: surface
+ * found outside the scope that nobody decided on, and - once the analysis is underway - WSTG
+ * categories of in-scope applications that nobody tested or marked partial / not applicable with a
+ * reason. "I did not get to it" is not a reason; "no test account" is.
+ */
+export function closingBlockers(e: ReturnType<OperationContext["engagement"]>): string | undefined {
+  const parts: string[] = [];
+  const undecided = undecidedSurface(e);
+  if (undecided.length) {
+    parts.push(
+      `${undecided.length} host(s) of the client's domains were found outside the scope and nobody decided on them: ${undecided
+        .slice(0, 10)
+        .map((s) => `${s.host}${s.title ? ` («${s.title}»)` : ""}`)
+        .join(", ")}${undecided.length > 10 ? "…" : ""}. Look at what each one is, then surface_decide: propose including the ones worth testing (say why: an exposed tool, a QA environment, plain HTTP, a known-vulnerable version) and set aside the rest with the reason.`,
+    );
+  }
+  const plan = getPlan(e);
+  if (plan.current && ANALYSIS_OR_LATER.has(plan.current)) {
+    const apps: string[] = [];
+    for (const app of e.query({ kind: "webapp", limit: 500 }).filter((a) => !a.outOfScope)) {
+      const cov = (app.attributes.coverage ?? {}) as Record<string, { status?: string }>;
+      const missing = WSTG.filter((c) => !cov[c.id] || cov[c.id]!.status === "untested" || cov[c.id]!.status === "in_progress").map((c) => c.id);
+      if (missing.length) apps.push(`${String(app.attributes.origin).replace(/:(443|80)$/, "")} (${app.id}): ${missing.join(", ")}`);
+    }
+    if (apps.length) {
+      parts.push(
+        `WSTG categories still untested: ${apps.slice(0, 8).join("; ")}${apps.length > 8 ? "…" : ""}. Test them, or record each with webapp_set_coverage (categories: [...]) as partial or n/a with the reason in the note (e.g. "no test account", "no file upload on this app").`,
+      );
+    }
+  }
+  return parts.length ? `This round cannot close yet. ${parts.join(" ")}` : undefined;
+}
+
 export function untriagedObservations(e: ReturnType<OperationContext["engagement"]>): Array<{ id: string; title: string; severity: string }> {
   return e
     .query({ kind: "observation", limit: 5000 })
-    .filter((o) => (String(o.attributes.triage ?? "new") === "new") && !o.attributes.findingId && ["high", "critical"].includes(String(o.attributes.severityHint ?? "")))
+    // Leads (a 5xx, an origin the CDN cannot reach) count whatever their severity: they are the
+    // places a round must look at before it ends, not noise.
+    .filter((o) => (String(o.attributes.triage ?? "new") === "new") && !o.attributes.findingId && (["high", "critical"].includes(String(o.attributes.severityHint ?? "")) || String(o.attributes.sourceRule ?? "").startsWith("lead:")))
     .map((o) => ({ id: o.id, title: String(o.attributes.title), severity: String(o.attributes.severityHint) }));
 }
 

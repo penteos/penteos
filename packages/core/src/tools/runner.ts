@@ -108,6 +108,30 @@ export interface Approval {
 }
 
 const MISSING_ROUTE = new Set([404, 405, 410, 501]);
+
+/**
+ * A server error is a lead, never a dead end: a 500 or 504 often means the input reached code that
+ * was not ready for it (a path traversal, an unhandled type), and a CDN that cannot reach its origin
+ * (Cloudflare 52x/530) may point at a dangling record someone else could claim. Each one becomes an
+ * observation the round has to look at before it closes.
+ */
+export function leadFor(status: number, where: string): { title: string; sourceRule: string; detail: string } | undefined {
+  if (status === 530 || status === 523 || status === 521) {
+    return {
+      title: `The CDN cannot reach the origin of ${where} (${status}): possible dangling record`,
+      sourceRule: "lead:origin-unreachable",
+      detail: `Answered ${status}: the CDN has the name but its origin does not answer or does not exist. Check the DNS records behind it (CNAME to a cloud service, an IP no longer yours): a dangling one can be claimed by someone else (subdomain takeover). Not "not applicable": investigate.`,
+    };
+  }
+  if (status >= 500 && status !== 501) {
+    return {
+      title: `Server error on ${where} (${status}): investigate`,
+      sourceRule: "lead:server-error",
+      detail: `Answered ${status}. A server error is where input reached code that was not ready for it: vary the input (path segments, ../ and its encodings, types, lengths, missing fields) and compare. Promote what you find, or dismiss this with the reason once you looked.`,
+    };
+  }
+  return undefined;
+}
 /** nuclei flags that choose which templates run: with none of them, it is a sweep of all of them. */
 const NUCLEI_SELECTORS = new Set(["-t", "-templates", "-tags", "-id", "-s", "-severity", "-w", "-workflows", "-pt", "-type", "-tc", "-template-condition", "-a", "-author", "-nt", "-new-templates"]);
 
@@ -730,6 +754,8 @@ export class ToolRunner {
         caller.actor,
       );
       if (response.status === 429 || response.status === 423) this.noteDefence(url.origin, url.pathname, `${req.method} ${url.pathname} answered ${response.status}`, caller.actor);
+      const lead = leadFor(response.status, `${req.method} ${url.pathname}`);
+      if (lead) this.engagement.ingest({ format: INGEST_FORMAT, source: { parser: "lead@0.1.0", tool: "http" }, rawIds: [rawId], observedAt: new Date().toISOString(), items: [{ op: "observe", ...lead, affects: [{ kind: "endpoint", key: { origin: url.origin, path: url.pathname } }], severityHint: "info", rawId }] } as never, caller.actor);
       const done = this.engagement.finishRun(run.id, { status: "finished", rawIds: [rawId], summary: { http: { status: response.status, size: response.size, timeMs: response.timeMs }, ingested } });
       this.engagement.noteReachability(url.hostname, true);
       return { status: "http", run: done, response, rawId };
@@ -990,6 +1016,10 @@ export class ToolRunner {
           }
         }
         items.push({ op: "observe", title: `Endpoint answers without authentication: ${r.path}`, sourceRule: "apiprobe:no-auth", affects: [{ kind: "endpoint", key: { origin: base.origin, path: r.path.split("?")[0] } }], severityHint: refusing || contract ? "high" : "medium", detail: `GET ${samplePath(r.path)} returned ${r.noAuth} (${r.size} bytes) with no credentials${contract ? ", although the API's own contract says it requires authentication" : `, while most endpoints return ${mode}`}. Verify it exposes data or an action that should require authentication.`, ...(bodyRaw ? { rawId: bodyRaw } : {}) });
+      }
+      // Server errors met while sweeping: leads to vary the input on (the first few).
+      for (const r of results.filter((x) => x?.noAuth !== undefined && leadFor(x.noAuth, "")).slice(0, 5)) {
+        items.push({ op: "observe", ...leadFor(r.noAuth!, `GET ${r.path}`)!, affects: [{ kind: "endpoint", key: { origin: base.origin, path: r.path.split("?")[0] } }], severityHint: "info" });
       }
       const rawId = this.engagement.putRaw(`# api probe ${base.origin}\nmode no-auth status: ${mode}\n\n${results.map((r) => `${r.noAuth ?? "ERR"}\t${r.withHeader !== undefined ? r.withHeader + "\t" : ""}${r.path}`).join("\n")}`, { type: "stdout", mime: "text/plain", runId: run.id });
       const ingested = items.length ? this.engagement.ingest({ format: INGEST_FORMAT, source: { parser: "apiprobe@0.1.0", tool: "apiprobe" }, rawIds: [rawId], observedAt: new Date().toISOString(), items } as never, caller.actor) : undefined;

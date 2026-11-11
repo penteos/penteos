@@ -3,7 +3,7 @@ import { z } from "zod";
 import { defineOperation, OperationError } from "../registry.js";
 import { engagementId } from "./shared.js";
 import { findingsToDeepen } from "../../impact.js";
-import { untriagedObservations } from "./phases.js";
+import { closingBlockers, untriagedObservations } from "./phases.js";
 
 // ---------------------------------------------------------------------------------------------
 // Where we stand and where to go next: a pentest is never done in one pass.
@@ -80,6 +80,9 @@ defineOperation({
           .join("; ")}. Decide on each: promote the real ones (observation_promote → the verifier checks them), or dismiss the rest with observation_triage (false_positive / duplicate / accepted_risk) and a reason. Nothing high-signal should sit unreviewed.`,
       );
     }
+    // Nor with surface nobody decided on, or categories nobody tested (or marked, with the reason).
+    const blocked = closingBlockers(e);
+    if (blocked) throw new OperationError("VALIDATION_ERROR", blocked);
     const proposal = { id: ulid(), at: new Date().toISOString(), by: ctx.caller.actor, status: input.status, paths: input.paths };
     e.setState("paths", proposal);
     e.audit(ctx.caller.actor, "plan.propose_paths", { proposal: proposal.id }, proposal);

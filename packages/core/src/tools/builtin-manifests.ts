@@ -149,6 +149,9 @@ export const BUILTIN_MANIFESTS: unknown[] = [
         },
         { when: { url: "*" }, each: "tech", emit: [{ op: "upsert", kind: "webapp", key: { origin: "{{url|origin}}" }, attributes: { technologies: [{ name: "{{item}}", confidence: 0.8 }] } }] },
         { when: { webserver: "*" }, emit: [{ op: "upsert", kind: "webapp", key: { origin: "{{url|origin}}" }, attributes: { technologies: [{ name: "{{webserver}}", confidence: 0.9 }] } }] },
+        // Server errors and a CDN that cannot reach its origin: leads, never "not applicable" (runner.ts leadFor).
+        ...[500, 502, 503, 504].map((code) => ({ when: { url: "*", status_code: code }, emit: [{ op: "observe", title: `Server error on {{url}} (${code}): investigate`, sourceRule: "lead:server-error", affects: [{ kind: "webapp", key: { origin: "{{url|origin}}" } }], severityHint: "info", detail: `Answered ${code} to a plain request: find what input reaches the failing code (paths, parameters, methods).` }] })),
+        ...[521, 523, 530].map((code) => ({ when: { url: "*", status_code: code }, emit: [{ op: "observe", title: `The CDN cannot reach the origin of {{url|origin}} (${code}): possible dangling record`, sourceRule: "lead:origin-unreachable", affects: [{ kind: "webapp", key: { origin: "{{url|origin}}" } }], severityHint: "info", detail: `Answered ${code}: the CDN has the name but no reachable origin. Check the DNS records behind it (a CNAME to a cloud service, an IP no longer the client's): a dangling one can be claimed (subdomain takeover).` }] })),
         {
           when: { location: "*" },
           emit: [
