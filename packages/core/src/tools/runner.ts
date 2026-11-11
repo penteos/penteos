@@ -211,7 +211,23 @@ export type ProbeRequest =
   | { tool: "browser"; input: { action: BrowseAction; risk: RiskLevel } }
   | { tool: "serveractions"; input: ServerActionsInput }
   | { tool: "transport"; input: { target: string; path?: string; risk: RiskLevel } }
-  | { tool: "webprobe"; input: WebProbeInput };
+  | { tool: "webprobe"; input: WebProbeInput }
+  | { tool: "account"; input: AccountProbeInput };
+
+export type AccountProbeInput =
+  | {
+      check: "cross";
+      origin: string;
+      /** Account A's session as a header line ("Cookie: {{secret:a}}"): its requests are the reference. */
+      accountA: string;
+      /** Account B's (another user, or a lower role): replayed with it, and with no session. */
+      accountB: string;
+      /** Raw requests made as A; by default A's GET requests with identifiers from the proxy history. */
+      raws?: string[];
+      risk: RiskLevel;
+    }
+  | { check: "race"; origin: string; raw: string; count: number; risk: RiskLevel }
+  | { check: "logout"; origin: string; check_raw: string; logout_raw: string; risk: RiskLevel };
 
 export type WebProbeInput =
   | { check: "redirect"; origin: string; targets?: Array<{ path: string; param: string }>; risk: RiskLevel }
@@ -315,6 +331,7 @@ export type RunOutcome =
   | { status: "transport"; run: Run; issues?: TransportIssue[]; rawId?: string; error?: string }
   | { status: "dnscheck"; run: Run; issues?: DnsIssue[]; checked?: number; rawId?: string; error?: string }
   | { status: "webprobe"; run: Run; check: WebProbeInput["check"]; tried: number; hits?: WebProbeHit[]; rawId?: string; error?: string }
+  | { status: "account"; run: Run; check: AccountProbeInput["check"]; tried: number; hits?: WebProbeHit[]; summary?: Record<string, unknown>; rawId?: string; error?: string }
   | { status: "enumeration"; run: Run; result?: EnumerationResult; rawId?: string; sampleRawId?: string; error?: string }
   | { status: "versions"; run: Run; found?: Array<{ product: string; version: string; source: string; confidence: number; ecosystem?: string }>; rawId?: string; error?: string }
   | { status: "probe"; run: Run; basePath?: string; baseTrials?: Array<{ basePath: string; exist: number; of: number }>; results?: Array<{ path: string; noAuth?: number; size?: number; withHeader?: number }>; open?: string[]; modeStatus?: number; rawId?: string; error?: string }
@@ -1277,6 +1294,133 @@ export class ToolRunner {
   // -------------------------------------------------------------------------------------------
   // Rate limiting
   // -------------------------------------------------------------------------------------------
+
+  /**
+   * Tests that need test accounts, where a wallet's critical issues live:
+   *   - cross: account A's requests replayed with account B's session (another user or a lower
+   *     role) and with none: B or nobody reading what only A should is IDOR/BOLA or a missing check;
+   *   - race: the same request sent N times at once (two transfers against one balance), to see how
+   *     many the server accepts;
+   *   - logout: a session still valid after logging out.
+   * Only A's GET requests are replayed by default (a POST may change data): others only when given.
+   */
+  async accountProbe(input: AccountProbeInput, caller: ToolCaller, approvedBy?: Actor): Promise<RunOutcome> {
+    const base = new URL(input.origin);
+    const origin = base.origin;
+    const label = input.check === "cross" ? `cross-account ${origin}` : input.check === "race" ? `race ×${input.count} ${origin}` : `logout invalidation ${origin}`;
+    const decision = this.check([base.href], input.risk, approvedBy ? { type: "human" } : caller.policy);
+    if (decision.decision === "deny") return this.deny(caller, "account", [base.href], [base.href], input.risk, decision);
+    if (decision.decision === "ask") {
+      const grant = this.grantFor(caller, "account", [origin], input.risk);
+      if (grant) return this.accountProbe(input, { ...caller, policy: { type: "human" } }, grant.by);
+      const shown = input.check === "race" ? `${input.raw}\r\n\r\n[sent ${input.count} times at once]` : input.check === "logout" ? `${input.check_raw}\r\n\r\n---\r\n\r\n${input.logout_raw}` : `[account A's requests replayed with account B's session and with none]`;
+      return this.requestApproval(caller, decision, label, { kind: "http", origin, raw: shown, risk: input.risk, probe: { tool: "account", input } });
+    }
+    const run = this.engagement.startRun({ actor: caller.actor, origin: caller.origin, tool: "account", command: label, targets: [base.href], risk: input.risk, policy: { result: approvedBy ? "approved" : "allowed", ...(decision.ruleId ? { ruleId: decision.ruleId } : {}) }, runner: "local", attack: ["T1078"] });
+    const resolveLine = (line: string) => {
+      const r = this.engagement.resolveSecrets([line]);
+      if (r.missing.length) throw new Error(`Unknown secret(s): ${r.missing.join(", ")}. Save them first with secret_save.`);
+      const v = r.argv[0]!;
+      const i = v.indexOf(":");
+      if (i < 1) throw new Error(`not a header line: ${line}`);
+      return { name: v.slice(0, i).trim(), value: v.slice(i + 1).trim() };
+    };
+    const send = async (raw: string) => {
+      const resolved = this.engagement.resolveSecrets([raw]);
+      if (resolved.missing.length) throw new Error(`Unknown secret(s): ${resolved.missing.join(", ")}`);
+      const req = parseRawRequest(resolved.argv[0]!);
+      const u = requestUrl(origin, req);
+      if (u.origin !== origin) throw new Error("a request left the origin being tested");
+      const r = await sendHttp(u, req);
+      return { r, exchange: `${formatRequest(req, u)}\r\n\r\n${formatResponse(r).slice(0, 4000)}` };
+    };
+    const hits: Array<WebProbeHit & { exchange: string }> = [];
+    const log: string[] = [`# ${label}`];
+    let tried = 0;
+    let summary: Record<string, unknown> = {};
+    try {
+      if (input.check === "cross") {
+        const a = resolveLine(input.accountA);
+        const b = resolveLine(input.accountB);
+        // The reference: given requests, or A's own GETs with identifiers, from the proxy history.
+        const fromHistory = () => {
+          const out: Array<{ raw: string; body: string }> = [];
+          for (const e of this.engagement.queryProxy({ host: base.host, methods: ["GET"], status: "2xx", limit: 2000 })) {
+            if (!e.rawId || out.length >= 60) continue;
+            if (!/\/\d{2,}(?=\/|$|\?)|[0-9a-f]{8}-[0-9a-f]{4}-|[0-9a-f]{24}|[?&][a-z_]*id=/i.test(e.path)) continue;
+            const text = this.engagement.readRaw(e.rawId).toString("utf8");
+            const reqText = text.slice(0, e.requestLength ?? text.indexOf("\r\n\r\nHTTP/"));
+            if (!reqText.includes(a.value)) continue;
+            const response = text.slice(reqText.length).replace(/^\s+/, "");
+            out.push({ raw: reqText, body: response.replace(/^[\s\S]*?\r?\n\r?\n/, "") });
+          }
+          return out;
+        };
+        const refs = input.raws?.length ? [] : fromHistory();
+        const raws = input.raws?.length ? input.raws : refs.map((x) => x.raw);
+        if (!raws.length) throw new Error(`no reference requests: browse the app as account A through Penteos's proxy or browser first (GETs on resources with identifiers), or pass raws`);
+        const swap = (raw: string, to: { name: string; value: string } | undefined) => {
+          const lines = raw.split(/\r?\n/);
+          const end = lines.findIndex((l) => l === "");
+          const head = (end < 0 ? lines : lines.slice(0, end)).filter((l, i) => i === 0 || !l.toLowerCase().startsWith(`${a.name.toLowerCase()}:`));
+          if (to) head.push(`${to.name}: ${to.value}`);
+          return [...head, ...(end < 0 ? [""] : lines.slice(end))].join("\r\n");
+        };
+        for (const [i, raw] of raws.slice(0, 60).entries()) {
+          tried++;
+          const asA = refs[i]?.body !== undefined ? { body: refs[i]!.body, status: 200 } : await send(swap(raw, a)).then((x) => ({ body: x.r.body, status: x.r.status }));
+          if (asA.status < 200 || asA.status >= 300 || asA.body.length < 20) continue;
+          const asB = await send(swap(raw, b));
+          const anon = await send(swap(raw, undefined));
+          const line = raw.split(/\r?\n/)[0];
+          log.push(`${line}: A ${asA.status} ${asA.body.length}B · B ${asB.r.status} ${asB.r.body.length}B · none ${anon.r.status} ${anon.r.body.length}B`);
+          const same = (body: string) => body === asA.body || (Math.abs(body.length - asA.body.length) <= asA.body.length * 0.03 && body.length > 20);
+          const path = new URL(requestUrl(origin, parseRawRequest(raw)).href).pathname;
+          if (anon.r.status >= 200 && anon.r.status < 300 && same(anon.r.body)) hits.push({ title: `${line} answers account A's data with no session`, severity: "high", path, detail: "The same response account A gets is served to a request with no session at all: the endpoint does not check who asks.", exchange: anon.exchange });
+          else if (asB.r.status >= 200 && asB.r.status < 300 && same(asB.r.body)) hits.push({ title: `Account B reads account A's resource: ${line}`, severity: "high", path, detail: `With account B's session the server answers ${asB.r.status} with the same content account A gets (${asA.body.length} bytes): it checks that a session exists, not that it owns the resource (IDOR/BOLA). If B is a lower role on an admin resource, it is a privilege escalation.`, exchange: asB.exchange });
+          await new Promise((r) => setTimeout(r, 120));
+        }
+        summary = { replayed: tried };
+      } else if (input.check === "race") {
+        const count = Math.min(Math.max(input.count, 2), 10);
+        tried = count;
+        // All at once: each on its own connection, released together.
+        const results = await Promise.all(Array.from({ length: count }, () => send(input.raw).catch((e: Error) => ({ r: { status: 0, body: e.message, headers: [] as Array<[string, string]> }, exchange: e.message }))));
+        const statuses = results.map((x) => x.r.status);
+        const ok = statuses.filter((s) => s >= 200 && s < 300).length;
+        log.push(`statuses: ${statuses.join(", ")}`, ...results.map((x, i) => `#${i + 1} ${x.r.status} ${x.r.body.slice(0, 160).replace(/\s+/g, " ")}`));
+        summary = { sent: count, succeeded: ok, statuses };
+        const line = input.raw.split(/\r?\n/)[0]!;
+        if (ok > 1) hits.push({ title: `${ok} of ${count} simultaneous ${line} succeeded`, severity: "medium", path: parseRawRequest(input.raw).path.split("?")[0]!, detail: `Sent ${count} times at once: ${ok} were accepted. If the action should happen once (a transfer against one balance, a coupon, a vote, a one-time code), check the resulting state: more than one effect is a race condition.`, exchange: results.find((x) => x.r.status >= 200 && x.r.status < 300)!.exchange });
+      } else {
+        tried = 3;
+        const before = await send(input.check_raw);
+        await send(input.logout_raw);
+        await new Promise((r) => setTimeout(r, 500));
+        const after = await send(input.check_raw);
+        log.push(`before logout: ${before.r.status} ${before.r.body.length}B · after logout: ${after.r.status} ${after.r.body.length}B`);
+        summary = { before: before.r.status, after: after.r.status };
+        if (before.r.status >= 200 && before.r.status < 300 && after.r.status >= 200 && after.r.status < 300 && Math.abs(after.r.body.length - before.r.body.length) <= Math.max(50, before.r.body.length * 0.05)) {
+          hits.push({ title: "Session still valid after logging out", severity: "medium", path: parseRawRequest(input.check_raw).path.split("?")[0]!, detail: "The same session answered the same authenticated request after the logout request: logging out does not end the session on the server, so a stolen cookie keeps working.", exchange: after.exchange });
+        }
+      }
+      const rawId = this.engagement.putRaw(log.join("\n"), { type: "stdout", mime: "text/plain", runId: run.id });
+      const items = hits.flatMap((h) => {
+        const ex = this.engagement.putRaw(h.exchange, { type: "http_exchange", mime: "message/http", runId: run.id });
+        const key = { origin, path: h.path };
+        return [
+          { op: "upsert", kind: "endpoint", key, attributes: {}, confidence: 0.9 },
+          { op: "observe", title: h.title, sourceRule: `account:${input.check}`, affects: [{ kind: "endpoint", key }], severityHint: h.severity, detail: h.detail, rawId: ex },
+        ];
+      });
+      const ingested = items.length ? this.engagement.ingest({ format: INGEST_FORMAT, source: { parser: "account@0.1.0", tool: "account" }, rawIds: [rawId], observedAt: new Date().toISOString(), items } as never, caller.actor) : undefined;
+      const done = this.engagement.finishRun(run.id, { status: "finished", rawIds: [rawId], summary: { check: input.check, tried, hits: hits.length, ...summary, ...(ingested ? { ingested } : {}) } });
+      return { status: "account", run: done, check: input.check, tried, hits: hits.map(({ exchange: _x, ...h }) => h), summary, rawId };
+    } catch (e) {
+      const done = this.engagement.finishRun(run.id, { status: "failed", summary: { error: (e as Error).message } });
+      return { status: "account", run: done, check: input.check, tried, hits: hits.map(({ exchange: _x, ...h }) => h), error: (e as Error).message };
+    }
+  }
 
   /**
    * Open redirect, path traversal in path parameters and session guards that only check a cookie
@@ -2981,6 +3125,7 @@ export class ToolRunner {
       if (probe?.tool === "serveractions") return this.probeServerActions(probe.input, as, by);
       if (probe?.tool === "transport") return this.checkTransport(probe.input, as, by);
       if (probe?.tool === "webprobe") return this.webProbe(probe.input, as, by);
+      if (probe?.tool === "account") return this.accountProbe(probe.input, as, by);
       return this.runHttp(approval.request, as, by);
     }
     if (approval.request.kind === "proxy_rules") {

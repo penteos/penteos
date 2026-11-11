@@ -156,6 +156,36 @@ defineOperation({
 });
 
 defineOperation({
+  name: "web.cross_account",
+  title: "Replay one account's requests as another (IDOR/BOLA)",
+  description: "With two test accounts: account A's requests (by default its GETs on resources with identifiers, taken from the proxy history - browse as A through Penteos first) are replayed with account B's session and with no session. B, or nobody, getting what only A should is IDOR/BOLA (or a missing check); with B a lower role on admin resources, privilege escalation. Sessions as header lines with saved secrets: 'Cookie: {{secret:account_a}}'. Pass raws to test other requests (a POST may change data: only when you mean it).",
+  kind: "target",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId, origin: z.string().url(), accountA: z.string().min(3), accountB: z.string().min(3), raws: z.array(z.string().min(1)).max(60).optional(), risk: RiskLevel.default("active") }),
+  handler: async (input, ctx) => outcome(await ctx.runner(input.engagementId).accountProbe({ check: "cross", origin: input.origin, accountA: input.accountA, accountB: input.accountB, ...(input.raws?.length ? { raws: input.raws } : {}), risk: input.risk }, { ...ctx.caller, origin: ctx.caller.actor.type === "agent" ? "agent_tool" : "runner" }), ctx),
+});
+
+defineOperation({
+  name: "web.probe_race",
+  title: "Send a request several times at once (race condition)",
+  description: "Sends the same request 2-10 times at once (each on its own connection) and says how many the server accepted. For actions that must happen once: a transfer against one balance, redeeming a code or coupon, a vote, a one-time code. Intrusive (it may move money in the test account): it asks; use a test account with a small amount and check the state after.",
+  kind: "target",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId, origin: z.string().url(), raw: z.string().min(1), count: z.number().int().min(2).max(10).default(5), risk: RiskLevel.default("intrusive") }),
+  handler: async (input, ctx) => outcome(await ctx.runner(input.engagementId).accountProbe({ check: "race", origin: input.origin, raw: input.raw, count: input.count, risk: input.risk }, { ...ctx.caller, origin: ctx.caller.actor.type === "agent" ? "agent_tool" : "runner" }), ctx),
+});
+
+defineOperation({
+  name: "web.probe_logout",
+  title: "Check a session ends on logout",
+  description: "Sends an authenticated request (check, with a test account's session), then the logout request, then the first one again with the same session: still answered as before means logging out does not end the session on the server. It logs the test account out.",
+  kind: "target",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId, origin: z.string().url(), check: z.string().min(1).describe("An authenticated raw request, e.g. GET /api/user with Cookie: {{secret:account_a}}"), logout: z.string().min(1).describe("The raw logout request, with the same session"), risk: RiskLevel.default("active") }),
+  handler: async (input, ctx) => outcome(await ctx.runner(input.engagementId).accountProbe({ check: "logout", origin: input.origin, check_raw: input.check, logout_raw: input.logout, risk: input.risk }, { ...ctx.caller, origin: ctx.caller.actor.type === "agent" ? "agent_tool" : "runner" }), ctx),
+});
+
+defineOperation({
   name: "web.probe_redirects",
   title: "Probe for open redirects",
   description: "Sends the parameters that say where to go next (the ones the JavaScript names, the usual ones, or the ones given: targets [{path, param}]) an outside address in the encodings filters miss, and reports each that sends the browser there (Location, meta refresh, script). Login, logout, SSO and callback routes first.",

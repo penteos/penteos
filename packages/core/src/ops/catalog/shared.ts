@@ -120,6 +120,20 @@ export function outcome(result: RunOutcome | undefined, ctx?: OperationContext):
           : `${r.exact ? "Exact count" : "Estimate"}: ${r.estimate} record(s)${r.highest ? `, ids up to ${r.highest}` : ""}. Make it evidence (evidence_from_raw with rawId for the log${result.sampleRawId ? ", sampleRawId for one record" : ""}) and answer the reach question (finding_answer_impact key reach). Do not read the records one by one: the measure is the proof.`,
     };
   }
+  if (result.status === "account") {
+    const hits = result.hits ?? [];
+    return {
+      status: result.error ? "failed" : "done",
+      runId: result.run.id,
+      check: result.check,
+      tried: result.tried,
+      hits: hits.map((h) => `${h.severity}: ${h.title}`),
+      ...(result.summary ? { summary: result.summary } : {}),
+      ...(result.rawId ? { rawId: result.rawId } : {}),
+      ...(result.error ? { error: result.error } : {}),
+      note: hits.length ? "Each hit is an observation with the exchange as evidence: confirm what was reached (whose data, which action) and promote it; these are usually the most serious findings of a web app." : "Nothing shown (see rawId for each comparison).",
+    };
+  }
   if (result.status === "webprobe") {
     const hits = result.hits ?? [];
     return {

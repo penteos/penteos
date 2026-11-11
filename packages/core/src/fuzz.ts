@@ -29,6 +29,9 @@ export const BUILTIN = {
   rutas: ["admin", "login", "api", "api/v1", "backup", "config", "debug", "test", "dev", "old", "uploads", "files", ".git/HEAD", ".env", "robots.txt", "sitemap.xml", "server-status", "phpinfo.php", "swagger.json", "openapi.json", "graphql", "actuator/health", "console", "wp-admin", "status"],
   metodos: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"],
   booleanos: ["true", "false", "1", "0", "yes", "no", "null", "undefined", "[]", "{}"],
+  // Amounts a money-moving endpoint must refuse or handle: negative, zero, fractions finer than the
+  // currency, overflow, notation tricks.
+  montos: ["0", "-1", "-0.01", "-0", "0.001", "0.005", "1.005", "1e9", "1e-9", "9999999999999", "2147483648", "-2147483649", "NaN", "Infinity", "1,000", "00.10", "\"10\"", "[10]"],
 } as const;
 
 const MAX_FILE_LINES = 200_000;
