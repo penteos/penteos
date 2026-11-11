@@ -216,6 +216,16 @@ defineOperation({
 });
 
 defineOperation({
+  name: "web.probe_graphql",
+  title: "Probe GraphQL endpoints",
+  description: "Finds GraphQL on the usual paths (or the ones given, or known from the graph) and checks: introspection enabled (the schema is saved in the project, mutations listed), field suggestions with introspection off, batched queries (rate-limit bypass) and queries over GET (CSRF). Then test each query and mutation's authorization with the schema in hand.",
+  kind: "target",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId, origin: z.string().url(), paths: z.array(z.string().startsWith("/")).max(10).optional(), risk: RiskLevel.default("active") }),
+  handler: async (input, ctx) => outcome(await ctx.runner(input.engagementId).webProbe({ check: "graphql", origin: input.origin, ...(input.paths?.length ? { paths: input.paths } : {}), risk: input.risk }, { ...ctx.caller, origin: ctx.caller.actor.type === "agent" ? "agent_tool" : "runner" }), ctx),
+});
+
+defineOperation({
   name: "dns.check_mail",
   title: "Check a domain's mail spoofing defences",
   description: "SPF, DMARC and DKIM (common selectors) of a domain, with lookups only (passive): missing or permissive SPF, DMARC missing or p=none, no reports. Run it on the client's main domains: a spoofable domain is a phishing vector against their own customers.",

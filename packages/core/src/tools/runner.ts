@@ -232,7 +232,8 @@ export type AccountProbeInput =
 export type WebProbeInput =
   | { check: "redirect"; origin: string; targets?: Array<{ path: string; param: string }>; risk: RiskLevel }
   | { check: "traversal"; origin: string; templates?: string[]; risk: RiskLevel }
-  | { check: "guard"; origin: string; paths?: string[]; risk: RiskLevel };
+  | { check: "guard"; origin: string; paths?: string[]; risk: RiskLevel }
+  | { check: "graphql"; origin: string; paths?: string[]; risk: RiskLevel };
 
 export interface WebProbeHit {
   title: string;
@@ -1489,6 +1490,59 @@ export class ToolRunner {
               break;
             }
           }
+        }
+      } else if (input.check === "graphql") {
+        const known = endpoints.map((e) => String(e.attributes.pathTemplate ?? "")).filter((p) => /graphql|\/gql\b|\/query$/i.test(p));
+        const paths = input.paths?.length ? input.paths : [...new Set([...known, "/graphql", "/api/graphql", "/v1/graphql", "/graphql/v1", "/query"])].slice(0, 8);
+        const post = async (path: string, body: string) => {
+          const u = new URL(path, origin);
+          const r = await sendHttp(u, { method: "POST", path: u.pathname + u.search, headers: [["Host", u.host], ["Content-Type", "application/json"], ["Accept", "application/json"]], body });
+          await new Promise((res) => setTimeout(res, 100));
+          return { r, exchange: `POST ${u.pathname} HTTP/1.1\nHost: ${u.host}\nContent-Type: application/json\n\n${body}\n\n${formatResponse(r).slice(0, 4000)}` };
+        };
+        const gqlSeen = new Map<string, string>();
+        const isGraphql = (body: string) => /"data"\s*:|"errors"\s*:\s*\[/.test(body);
+        for (const path of paths) {
+          tried++;
+          const probe = await post(path, JSON.stringify({ query: "{__typename}" }));
+          if (!isGraphql(probe.r.body)) {
+            log.push(`${path}: ${probe.r.status}, not GraphQL`);
+            continue;
+          }
+          log.push(`${path}: GraphQL (${probe.r.status})`);
+          tried++;
+          const intro = await post(path, JSON.stringify({ query: "query IntrospectionQuery { __schema { queryType { name } mutationType { name } types { name kind fields { name args { name } } } } }" }));
+          // The same schema on another path is the same endpoint (servers often answer any /graphql/*).
+          if (gqlSeen.has(intro.r.body)) {
+            log.push(`  same endpoint as ${gqlSeen.get(intro.r.body)}`);
+            continue;
+          }
+          gqlSeen.set(intro.r.body, path);
+          if (/"__schema"\s*:\s*\{/.test(intro.r.body)) {
+            let mutations: string[] = [];
+            try {
+              const schema = JSON.parse(intro.r.body).data.__schema;
+              const mt = schema.mutationType?.name;
+              mutations = (schema.types as Array<{ name: string; fields?: Array<{ name: string }> }>).find((t) => t.name === mt)?.fields?.map((f) => f.name) ?? [];
+              const file = join(this.workDir(), "graphql", `${base.host.replace(/[^A-Za-z0-9.-]/g, "_")}${path.replace(/[^A-Za-z0-9]+/g, "_")}.json`);
+              mkdirSync(dirname(file), { recursive: true });
+              writeFileSync(file, intro.r.body, { mode: 0o600 });
+              log.push(`  introspection: schema saved to ${file}; ${mutations.length} mutation(s)`);
+            } catch {
+              /* kept in the evidence anyway */
+            }
+            hits.push({ title: `GraphQL introspection enabled on ${path}`, severity: "medium", path, detail: `The full schema is readable by anyone${mutations.length ? `, including ${mutations.length} mutation(s): ${mutations.slice(0, 12).join(", ")}` : ""}. It maps the whole API (and its admin operations) for an attacker. Test each query and mutation's authorization next.`, exchange: intro.exchange });
+          } else {
+            tried++;
+            const suggest = await post(path, JSON.stringify({ query: "{ __typename usr }" }));
+            if (/did you mean/i.test(suggest.r.body)) hits.push({ title: `GraphQL suggests field names on ${path} (introspection off)`, severity: "low", path, detail: "Error messages suggest real field names: the schema can be rebuilt by guessing (clairvoyance-style).", exchange: suggest.exchange });
+          }
+          tried++;
+          const batch = await post(path, JSON.stringify([{ query: "{__typename}" }, { query: "{__typename}" }]));
+          if (/^\s*\[/.test(batch.r.body) && isGraphql(batch.r.body)) hits.push({ title: `GraphQL accepts batched queries on ${path}`, severity: "low", path, detail: "Several operations in one request: per-request rate limits (logins, codes) can be bypassed by batching attempts.", exchange: batch.exchange });
+          tried++;
+          const viaGet = await get(`${path}?query=${encodeURIComponent("{__typename}")}`);
+          if (viaGet.r.status === 200 && isGraphql(viaGet.r.body)) hits.push({ title: `GraphQL answers GET requests on ${path}`, severity: "low", path, detail: "Queries over GET can be triggered cross-site (CSRF) if mutations are accepted the same way and the session is a cookie.", exchange: viaGet.exchange });
         }
       } else {
         const fromRoutes = guardedRoutes([...leads.routes, ...endpoints.map((e) => String(e.attributes.pathTemplate ?? ""))]);
