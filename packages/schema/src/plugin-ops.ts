@@ -91,6 +91,7 @@ export const REPORT_SECTION_IDS = [
   "scope",
   "paths",
   "retest",
+  "comparison",
   "findings",
   "detailed",
   "surface",

@@ -1,5 +1,6 @@
 import { WSTG, wstgTitle } from "../../wstg.js";
 import { undecidedSurface } from "../../surface.js";
+import { undecidedBaseline } from "../../baseline.js";
 import type { OperationContext } from "../registry.js";
 import { gapLine, isCritical, listGaps } from "../../tools/capabilities.js";
 import { defineOperation, OperationError } from "../registry.js";
@@ -172,6 +173,10 @@ export function closingBlockers(e: ReturnType<OperationContext["engagement"]>): 
         .map((s) => `${s.host}${s.title ? ` («${s.title}»)` : ""}`)
         .join(", ")}${undecided.length > 10 ? "…" : ""}. Look at what each one is, then surface_decide: propose including the ones worth testing (say why: an exposed tool, a QA environment, plain HTTP, a known-vulnerable version) and set aside the rest with the reason.`,
     );
+  }
+  const previous = undecidedBaseline(e);
+  if (previous.length) {
+    parts.push(`${previous.length} finding(s) of the previous assessment have no status: ${previous.slice(0, 8).map((f) => `${f.ref} «${f.title}»`).join(", ")}. Re-test each and record it with baseline_link (still_open with this assessment's finding, fixed with how you checked, or not_retested with why).`);
   }
   const plan = getPlan(e);
   if (plan.current && ANALYSIS_OR_LATER.has(plan.current)) {

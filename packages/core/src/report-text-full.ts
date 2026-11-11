@@ -17,6 +17,13 @@ export interface FullReportText {
   riskLine: (level: string, total: number, top: string) => string;
   /** Why the overall risk is not determined: what was not done and what was not tested. */
   coverageCaveat: (c: { phases: string[]; untested: number; applicable: number; apps: Array<{ origin: string; untested: number; applicable: number }> }) => string;
+  /** A previous assessment done elsewhere, compared with this one. */
+  comparisonTitle: string;
+  comparisonIntro: (source: string, date?: string) => string;
+  comparisonCounts: (c: { fixed: number; open: number; notRetested: number }) => string;
+  comparisonHead: string;
+  comparisonStatus: Record<"still_open" | "fixed" | "not_retested", string>;
+  comparisonNew: (n: number) => string;
   /** Assets found during the work that were outside this round's scope (not tested). */
   discoveredTitle: string;
   discoveredIntro: string;
@@ -118,6 +125,12 @@ const es: FullReportText = {
   coverageCaveat: (c) =>
     `**La cobertura alcanzada no permite determinar el riesgo general.**${c.phases.length ? ` Quedó sin realizar: ${c.phases.join(", ")}.` : ""}${c.applicable ? ` Sin probar: ${c.untested} de ${c.applicable} categorías aplicables de OWASP WSTG${c.apps.length ? ` (${c.apps.map((a) => `${a.origin}: ${a.untested} de ${a.applicable}`).join("; ")})` : ""}.` : ""} Lo informado describe lo encontrado en lo que sí se probó; no indica la ausencia de otros problemas.`,
   acceptedLimitations: "Limitaciones aceptadas para esta entrega",
+  comparisonTitle: "Comparación con la evaluación anterior",
+  comparisonIntro: (source, date) => `Se tomó como referencia ${source}${date ? ` (${date})` : ""}. Cada hallazgo de esa evaluación se volvió a verificar en esta:`,
+  comparisonCounts: (c) => `**Corregidos:** ${c.fixed} · **Siguen abiertos:** ${c.open} · **No re-verificados:** ${c.notRetested}`,
+  comparisonHead: "| Ref. | Hallazgo anterior | Severidad | Estado | En esta evaluación |",
+  comparisonStatus: { still_open: "Sigue abierto", fixed: "Corregido", not_retested: "No re-verificado" },
+  comparisonNew: (n) => (n === 1 ? "1 hallazgo nuevo en esta evaluación" : `${n} hallazgos nuevos en esta evaluación`),
   discoveredTitle: "Activos descubiertos fuera del alcance de esta ronda",
   discoveredIntro: "Aparecieron durante el reconocimiento y no se probaron porque no estaban incluidos en el alcance. Se recomienda evaluar su inclusión en una próxima ronda:",
   secretRef: "[credencial de prueba]",
@@ -185,6 +198,12 @@ const en: FullReportText = {
   coverageCaveat: (c) =>
     `**The coverage reached does not allow determining the overall risk.**${c.phases.length ? ` Not carried out: ${c.phases.join(", ")}.` : ""}${c.applicable ? ` Untested: ${c.untested} of ${c.applicable} applicable OWASP WSTG categories${c.apps.length ? ` (${c.apps.map((a) => `${a.origin}: ${a.untested} of ${a.applicable}`).join("; ")})` : ""}.` : ""} What is reported describes what was found in what was tested; it does not indicate the absence of other problems.`,
   acceptedLimitations: "Limitations accepted for this delivery",
+  comparisonTitle: "Comparison with the previous assessment",
+  comparisonIntro: (source, date) => `The reference was ${source}${date ? ` (${date})` : ""}. Each of its findings was checked again in this one:`,
+  comparisonCounts: (c) => `**Fixed:** ${c.fixed} · **Still open:** ${c.open} · **Not re-tested:** ${c.notRetested}`,
+  comparisonHead: "| Ref. | Previous finding | Severity | Status | In this assessment |",
+  comparisonStatus: { still_open: "Still open", fixed: "Fixed", not_retested: "Not re-tested" },
+  comparisonNew: (n) => (n === 1 ? "1 new finding in this assessment" : `${n} new findings in this assessment`),
   discoveredTitle: "Assets discovered outside this round's scope",
   discoveredIntro: "They appeared during reconnaissance and were not tested because they were not in scope. Including them in a next round is recommended:",
   secretRef: "[test credential]",

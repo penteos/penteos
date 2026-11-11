@@ -5,6 +5,7 @@ import { WSTG, wstgTitle } from "./wstg.js";
 import { REPORT_TEXT, type ReportText } from "./report-text.js";
 import { cvssBreakdown, FULL_TEXT } from "./report-text-full.js";
 import { getPlan } from "./plan.js";
+import { getBaseline } from "./baseline.js";
 import { type EntityAttributes, REPORT_SECTION_IDS } from "@penteos/schema";
 import type { Engagement, Entity } from "./engagement.js";
 
@@ -226,7 +227,7 @@ function forReaders(engagement: Engagement, text: string, secretRef: string): st
 }
 
 /** What the executive report keeps. */
-const EXECUTIVE_SECTIONS = ["document_control", "executive_summary", "scope", "retest", "findings", "remediation_plan", "conclusion"];
+const EXECUTIVE_SECTIONS = ["document_control", "executive_summary", "scope", "retest", "comparison", "findings", "remediation_plan", "conclusion"];
 
 export function renderReport(engagement: Engagement, options: ReportOptions = {}): string {
   const info = engagement.info;
@@ -386,6 +387,23 @@ export function renderReport(engagement: Engagement, options: ReportOptions = {}
         "",
       );
     }
+  }
+
+  // A previous assessment done elsewhere: what was fixed, what remains, what is new.
+  const baseline = getBaseline(engagement);
+  if (baseline?.findings.length) {
+    section("comparison", F.comparisonTitle);
+    const by = (s?: string) => baseline.findings.filter((f) => f.status === s).length;
+    out.push(F.comparisonIntro(baseline.source, baseline.date), "", F.comparisonCounts({ fixed: by("fixed"), open: by("still_open"), notRetested: by("not_retested") + by(undefined) }), "", F.comparisonHead, "|---|---|---|---|---|");
+    for (const f of baseline.findings) {
+      const now = f.findingId ? engagement.get(f.findingId) : undefined;
+      out.push(`| ${cell(f.ref)} | ${cell(f.title)} | ${SEVERITY_ES[f.severity] ?? f.severity} | ${F.comparisonStatus[f.status ?? "not_retested"]} | ${cell(now ? `«${String(now.attributes.title)}»` : f.note ?? "")} |`);
+    }
+    const linked = new Set(baseline.findings.map((f) => f.findingId).filter(Boolean));
+    const fresh = findings.filter((f) => !linked.has(f.id));
+    out.push("", `**${F.comparisonNew(fresh.length)}**`, "");
+    for (const f of fresh.slice(0, 40)) out.push(`- ${cell(attrs(f).title)} (${SEVERITY_ES[attrs(f).severity]})`);
+    out.push("");
   }
 
   section("findings", round === "retest" ? T.findings : T.findingsSummary);
