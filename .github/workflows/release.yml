@@ -107,10 +107,12 @@ jobs:
         with:
           name: packages
           path: pkg
+      # Public resolvers in the test containers: a hiccup of the runners' DNS (it once stopped
+      # resolving *.ubuntu.com for hours) must not block a release that is fine.
       - name: Install as a user would, run the core end to end, open the app on a virtual screen
         run: |
           cp scripts/release/check-install.sh scripts/release/e2e-core.mjs pkg/
-          docker run --rm -v "$PWD/pkg":/pkg:ro "${{ matrix.image }}" sh /pkg/check-install.sh "${{ matrix.family }}"
+          docker run --rm --dns 1.1.1.1 --dns 8.8.8.8 -v "$PWD/pkg":/pkg:ro "${{ matrix.image }}" sh /pkg/check-install.sh "${{ matrix.family }}"
 
   # The one-line installer itself, end to end on a clean system, against the packages just built.
   installer:
@@ -123,7 +125,7 @@ jobs:
           path: pkg
       - name: curl | sh, as the README says (deb), then as a non-root user (AppImage)
         run: |
-          docker run --rm -v "$PWD/pkg":/pkg:ro ubuntu:24.04 sh -c '
+          docker run --rm --dns 1.1.1.1 --dns 8.8.8.8 -v "$PWD/pkg":/pkg:ro ubuntu:24.04 sh -c '
             set -e
             apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null
             PENTEOS_RELEASES=file:///pkg sh /pkg/install.sh
