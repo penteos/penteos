@@ -1,6 +1,6 @@
 import { defineOperation, OperationError } from "../registry.js";
 import { z } from "zod";
-import { Branding, DELIVERABLE_STATUSES, renderReport, type ReportDraft } from "../../report.js";
+import { Branding, reportReadiness, DELIVERABLE_STATUSES, renderReport, type ReportDraft } from "../../report.js";
 import { reportToHtml } from "../../report-html.js";
 import type { Engagement } from "../../engagement.js";
 import { ulid } from "@penteos/schema";
@@ -95,15 +95,23 @@ defineOperation({
     format: z.enum(["markdown", "docx", "html"]).default("markdown"),
     kind: z.enum(["technical", "executive"]).default("technical"),
     issue: z.boolean().default(false).describe("Record this as a delivered version (with what changed since the previous one)."),
+    limitations: z.string().max(4000).optional().describe("Only a person: the limits of this delivery they accept (e.g. 'no test accounts; the back office was out of reach'), to issue it as final with partial coverage. Printed in the report."),
   }),
   handler: async (input, ctx) => {
     const e = ctx.engagement(input.engagementId);
     const info = e.info;
+    if (input.limitations?.trim() && ctx.caller.actor.type !== "human") throw new OperationError("PERMISSION_DENIED", "only a person accepts the limits of a delivery");
+    // A report is final only when it is: the executive summary written, and the coverage enough to
+    // state the overall risk (or its limits accepted by a person). Otherwise it is a draft, on every
+    // page, whatever was asked, and the answer says what is missing.
+    const { missing, coverage } = reportReadiness(e, input.limitations);
+    // Marked a draft (banner, stamp, file name) is not the same as including unapproved findings.
+    const asDraft = input.includeDrafts || missing.length > 0;
     const branding = ctx.workspace.branding();
     // Sections plugins enabled in this project add (one that fails is left out and reported).
     const plugins = ctx.pluginRuntime ? await ctx.pluginRuntime.reportSections(e, ctx) : { sections: [], problems: [] };
-    const markdown = renderReport(e, { includeDrafts: input.includeDrafts, extra: plugins.sections, kind: input.kind, ...(branding.companyName ? { company: branding.companyName } : {}), ...(branding.authors ? { authors: branding.authors } : {}) });
-    const pluginSections = plugins.problems.length ? { pluginProblems: plugins.problems } : {};
+    const markdown = renderReport(e, { includeDrafts: input.includeDrafts, markDraft: asDraft, extra: plugins.sections, kind: input.kind, ...(input.limitations?.trim() ? { limitations: input.limitations.trim() } : {}), ...(branding.companyName ? { company: branding.companyName } : {}), ...(branding.authors ? { authors: branding.authors } : {}) });
+    const pluginSections = { readiness: { final: !asDraft, missing, coverage }, ...(plugins.problems.length ? { pluginProblems: plugins.problems } : {}) };
     // The deliverable carries the real values; what an agent reads back keeps the vault's markers.
     const forPeople = restore(e, markdown).text;
     const date = new Date().toISOString().slice(0, 10);
@@ -120,10 +128,10 @@ defineOperation({
     const dir = join(e.dir, "reports");
     mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const base = `${T.fileName}${input.kind === "executive" ? "-ejecutivo" : ""}-${stamp}${input.includeDrafts ? `-${T.draftSuffix}` : ""}`;
-    const issued = (format: string, file?: string) => (input.issue || format === "docx" ? recordVersion(e, { kind: input.kind, format, includeDrafts: input.includeDrafts, ...(file ? { file } : {}) }) : undefined);
+    const base = `${T.fileName}${input.kind === "executive" ? "-ejecutivo" : ""}-${stamp}${asDraft ? `-${T.draftSuffix}` : ""}`;
+    const issued = (format: string, file?: string) => (input.issue || format === "docx" ? recordVersion(e, { kind: input.kind, format, includeDrafts: asDraft, ...(file ? { file } : {}) }) : undefined);
     if (input.format === "docx") {
-      const docx = await reportToDocx(forPeople, branding, { client: info.clientName, engagement: info.name, date, draft: input.includeDrafts, language: info.language, image });
+      const docx = await reportToDocx(forPeople, branding, { client: info.clientName, engagement: info.name, date, draft: asDraft, language: info.language, image });
       const file = join(dir, `${base}.docx`);
       writeFileSync(file, docx, { mode: 0o600 });
       e.audit(ctx.caller.actor, "report.render", { file }, { includeDrafts: input.includeDrafts, format: "docx", kind: input.kind, size: docx.length });
@@ -131,7 +139,7 @@ defineOperation({
       return { file, docxBase64: docx.toString("base64"), ...(version ? { version } : {}), ...pluginSections };
     }
     if (input.format === "html") {
-      const html = reportToHtml(forPeople, branding, { client: info.clientName, engagement: info.name, date, draft: input.includeDrafts, language: info.language, image });
+      const html = reportToHtml(forPeople, branding, { client: info.clientName, engagement: info.name, date, draft: asDraft, language: info.language, image });
       if (input.issue) e.audit(ctx.caller.actor, "report.render", { kind: input.kind }, { includeDrafts: input.includeDrafts, format: "pdf", kind: input.kind });
       const version = issued("pdf");
       return { html, markdown, fileName: base, ...(version ? { version } : {}), ...pluginSections };
@@ -144,7 +152,7 @@ defineOperation({
     return {
       markdown,
       file,
-      meta: { engagement: info.name, client: info.clientName, mode: info.mode, date, draft: input.includeDrafts },
+      meta: { engagement: info.name, client: info.clientName, mode: info.mode, date, draft: asDraft },
       branding,
       ...(version ? { version } : {}),
       ...pluginSections,

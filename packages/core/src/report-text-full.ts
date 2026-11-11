@@ -11,7 +11,19 @@ export interface FullReportText {
   testTypes: Record<"black" | "grey" | "white", string>;
   overallRisk: string;
   riskLevels: Record<"critical" | "high" | "medium" | "low" | "none", string>;
+  /** The overall risk when coverage does not allow saying more than the worst finding found. */
+  riskUndetermined: string;
+  riskAtLeast: (level: string) => string;
   riskLine: (level: string, total: number, top: string) => string;
+  /** Why the overall risk is not determined: what was not done and what was not tested. */
+  coverageCaveat: (c: { phases: string[]; untested: number; applicable: number; apps: Array<{ origin: string; untested: number; applicable: number }> }) => string;
+  /** Assets found during the work that were outside this round's scope (not tested). */
+  discoveredTitle: string;
+  discoveredIntro: string;
+  /** The limitations a person accepted to issue the report as final. */
+  acceptedLimitations: string;
+  /** In a report, a saved credential is named, never shown (nor its internal marker). */
+  secretRef: string;
   topRisks: string;
   rulesOfEngagement: string;
   window: (from: string, to: string) => string;
@@ -101,6 +113,14 @@ const es: FullReportText = {
   testTypes: { black: "Caja negra (sin información previa)", grey: "Caja gris (con información o credenciales parciales)", white: "Caja blanca (con acceso completo a la información)" },
   overallRisk: "Nivel de riesgo general",
   riskLevels: { critical: "Crítico", high: "Alto", medium: "Medio", low: "Bajo", none: "Sin riesgos relevantes" },
+  riskUndetermined: "No determinado",
+  riskAtLeast: (level) => `al menos ${level}`,
+  coverageCaveat: (c) =>
+    `**La cobertura alcanzada no permite determinar el riesgo general.**${c.phases.length ? ` Quedó sin realizar: ${c.phases.join(", ")}.` : ""}${c.applicable ? ` Sin probar: ${c.untested} de ${c.applicable} categorías aplicables de OWASP WSTG${c.apps.length ? ` (${c.apps.map((a) => `${a.origin}: ${a.untested} de ${a.applicable}`).join("; ")})` : ""}.` : ""} Lo informado describe lo encontrado en lo que sí se probó; no indica la ausencia de otros problemas.`,
+  acceptedLimitations: "Limitaciones aceptadas para esta entrega",
+  discoveredTitle: "Activos descubiertos fuera del alcance de esta ronda",
+  discoveredIntro: "Aparecieron durante el reconocimiento y no se probaron porque no estaban incluidos en el alcance. Se recomienda evaluar su inclusión en una próxima ronda:",
+  secretRef: "[credencial de prueba]",
   riskLine: (level, total, top) => `**Nivel de riesgo general: ${level}.** Se informan ${total} hallazgos${top ? `; el más grave: ${top}` : ""}.`,
   topRisks: "Riesgos principales",
   rulesOfEngagement: "Reglas de compromiso",
@@ -160,6 +180,14 @@ const en: FullReportText = {
   testTypes: { black: "Black box (no prior information)", grey: "Grey box (partial information or credentials)", white: "White box (full access to information)" },
   overallRisk: "Overall risk",
   riskLevels: { critical: "Critical", high: "High", medium: "Medium", low: "Low", none: "No relevant risks" },
+  riskUndetermined: "Not determined",
+  riskAtLeast: (level) => `at least ${level}`,
+  coverageCaveat: (c) =>
+    `**The coverage reached does not allow determining the overall risk.**${c.phases.length ? ` Not carried out: ${c.phases.join(", ")}.` : ""}${c.applicable ? ` Untested: ${c.untested} of ${c.applicable} applicable OWASP WSTG categories${c.apps.length ? ` (${c.apps.map((a) => `${a.origin}: ${a.untested} of ${a.applicable}`).join("; ")})` : ""}.` : ""} What is reported describes what was found in what was tested; it does not indicate the absence of other problems.`,
+  acceptedLimitations: "Limitations accepted for this delivery",
+  discoveredTitle: "Assets discovered outside this round's scope",
+  discoveredIntro: "They appeared during reconnaissance and were not tested because they were not in scope. Including them in a next round is recommended:",
+  secretRef: "[test credential]",
   riskLine: (level, total, top) => `**Overall risk: ${level}.** ${total} findings are reported${top ? `; the most serious: ${top}` : ""}.`,
   topRisks: "Main risks",
   rulesOfEngagement: "Rules of engagement",

@@ -23,6 +23,14 @@ interface Draft {
   distribution?: string;
   version?: string;
 }
+/** Whether the work done allows stating the overall risk (core: assessmentCoverage). */
+interface Coverage {
+  determined: boolean;
+  phases: string[];
+  untested: number;
+  applicable: number;
+}
+
 interface ReportState {
   draft: Draft;
   readiness: {
@@ -35,6 +43,7 @@ interface ReportState {
     withoutReproduction: Array<{ id: string; title: string }>;
     hasExecutiveSummary: boolean;
     hasConclusion: boolean;
+    coverage: Coverage;
   };
 }
 interface Branding {
@@ -161,7 +170,7 @@ export function ReportPanel() {
   const traces = useTraces();
   const pendingTraces = (traces.data ?? []).filter((x) => x.status === "pending").length;
   const r = state.data?.readiness;
-  const open = r ? [r.deliverable === 0, r.drafts + r.inReview > 0, r.withoutEvidence.length > 0, r.withoutRemediation.length > 0, r.withoutReproduction.length > 0, !r.hasExecutiveSummary, pendingTraces > 0].filter(Boolean).length : 0;
+  const open = r ? [r.deliverable === 0, r.drafts + r.inReview > 0, r.withoutEvidence.length > 0, r.withoutRemediation.length > 0, r.withoutReproduction.length > 0, !r.hasExecutiveSummary, !r.coverage?.determined, pendingTraces > 0].filter(Boolean).length : 0;
   const steps: Array<{ id: Step; label: string; badge?: number }> = [
     { id: "prepare", label: t("ops.report.step.prepare"), ...(open ? { badge: open } : {}) },
     { id: "write", label: t("ops.report.step.write") },
@@ -188,7 +197,7 @@ export function ReportPanel() {
         <div className="report">
           {step === "prepare" ? <Prepare state={state.data} pendingTraces={pendingTraces} onWrite={() => setStep("write")} onGenerate={() => setStep("generate")} /> : null}
           {step === "write" ? <Write draft={state.data?.draft ?? {}} onSaved={() => state.reload()} /> : null}
-          {step === "generate" ? <Generate /> : null}
+          {step === "generate" ? <Generate {...(r ? { readiness: r } : {})} /> : null}
           {step === "versions" ? <Versions /> : null}
         </div>
       </div>
@@ -340,8 +349,9 @@ function Write(props: { draft: Draft; onSaved: () => void }) {
 }
 
 /** Technical or executive; PDF, Word or markdown; and the preview of exactly what goes out. */
-function Generate() {
+function Generate(props: { readiness?: ReportState["readiness"] }) {
   const { client, engagement } = useApp();
+  const [limitations, setLimitations] = useState("");
   const [kind, setKind] = useState<"technical" | "executive">("technical");
   const [includeDrafts, setIncludeDrafts] = useState(false);
   const [busy, setBusy] = useState<string>();
@@ -359,7 +369,7 @@ function Generate() {
     }
   }
   function render(format: string, issue: boolean): Rendering {
-    return client.call("report.render", { kind, includeDrafts, format, issue });
+    return client.call("report.render", { kind, includeDrafts, format, issue, ...(limitations.trim() ? { limitations: limitations.trim() } : {}) });
   }
   const preview = () =>
     run("preview", async () => {
@@ -397,8 +407,29 @@ function Generate() {
       const r = await render("markdown", true);
       save(`${base}.md`, new Blob([r.markdown ?? ""], { type: "text/markdown" }));
     });
+  // Final or draft, and why: an unfinished report goes out marked as a draft on every page.
+  const r = props.readiness;
+  const noSummary = r ? !r.hasExecutiveSummary : false;
+  const cov = r?.coverage;
+  const coverageShort = cov ? !cov.determined && !limitations.trim() : false;
+  const detail = cov ? [cov.phases.length ? t("ops.report.readiness.phases", { phases: cov.phases.join(", ") }) : "", cov.applicable && cov.untested ? t("ops.report.readiness.untested", { untested: cov.untested, applicable: cov.applicable }) : ""].filter(Boolean).join("; ") : "";
   return (
     <>
+      {r ? (
+        <section className={`report-readiness ${noSummary || coverageShort ? "draft" : "final"}`}>
+          <b>{noSummary || coverageShort ? t("ops.report.readiness.draftTitle") : t("ops.report.readiness.finalTitle")}</b>
+          {noSummary ? <p>{t("ops.report.readiness.noSummary")}</p> : null}
+          {cov && !cov.determined ? (
+            <>
+              <p>{t("ops.report.readiness.coverage", { detail })}</p>
+              <label className="report-limitations">
+                {t("ops.report.readiness.limitationsLabel")}
+                <textarea className="input" rows={2} value={limitations} placeholder={t("ops.report.readiness.limitationsPlaceholder")} onChange={(e) => { setLimitations(e.target.value); setHtml(undefined); }} />
+              </label>
+            </>
+          ) : null}
+        </section>
+      ) : null}
       <section>
         <h2>{t("ops.report.kind.title")}</h2>
         <div className="report-kinds">

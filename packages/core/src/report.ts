@@ -66,6 +66,8 @@ export interface Readiness {
   withoutReproduction: Array<{ id: string; title: string }>;
   hasExecutiveSummary: boolean;
   hasConclusion: boolean;
+  /** Whether the work done allows stating the overall risk, and what is missing if not. */
+  coverage: AssessmentCoverage;
 }
 
 export function readiness(engagement: Engagement): Readiness {
@@ -81,6 +83,7 @@ export function readiness(engagement: Engagement): Readiness {
     withoutReproduction: findings.filter((f) => DELIVERABLE_STATUSES.has(String(f.attributes.status)) || f.attributes.status === "in_review").filter((f) => !String(f.attributes.reproduction ?? "").trim()).map((f) => ({ id: f.id, title: String(f.attributes.title) })),
     hasExecutiveSummary: Boolean(draft?.executiveSummary?.trim()),
     hasConclusion: Boolean(draft?.conclusion?.trim()),
+    coverage: assessmentCoverage(engagement),
   };
 }
 
@@ -118,7 +121,10 @@ export interface ExtraSection {
 }
 
 export interface ReportOptions {
+  /** Findings not yet approved go in too (the report is then a draft). */
   includeDrafts?: boolean;
+  /** Marked as a draft: unfinished (no executive summary, coverage not enough), whatever it holds. */
+  markDraft?: boolean;
   /** Only these sections (in their usual order). */
   only?: readonly string[];
   /** Every section but these. */
@@ -133,6 +139,90 @@ export interface ReportOptions {
   /** Who signs it, for the document control (the organization's branding). */
   company?: string;
   authors?: string;
+  /** What a person accepts as the limits of this delivery, to issue it as final with partial coverage. */
+  limitations?: string;
+}
+
+/**
+ * How much of the assessment was really done: testing phases not carried out (reporting aside) and,
+ * for web applications in scope, the OWASP WSTG categories that apply and were not tested. The
+ * overall risk is only stated when this allows it: a "Low" from one day without an account is a
+ * reassurance the work cannot back.
+ */
+export interface AssessmentCoverage {
+  determined: boolean;
+  phases: string[];
+  untested: number;
+  applicable: number;
+  apps: Array<{ origin: string; untested: number; applicable: number }>;
+}
+
+/** Above this share of applicable categories left untested, the overall risk is not determined. */
+const MAX_UNTESTED_SHARE = 0.4;
+
+export function assessmentCoverage(engagement: Engagement): AssessmentCoverage {
+  const plan = getPlan(engagement);
+  // Exploitation left undone is often the agreement (not authorized), not a gap in the analysis:
+  // it shows in the methodology, but it does not by itself keep the risk from being stated.
+  const phases = plan.phases.filter((p) => p.id !== "reporting" && !p.exploitation && p.status === "pending").map((p) => p.title);
+  const apps: AssessmentCoverage["apps"] = [];
+  for (const app of engagement.query({ kind: "webapp", limit: 1000 })) {
+    if (app.outOfScope) continue;
+    const cov = (app.attributes.coverage ?? {}) as Record<string, { status?: string }>;
+    let applicable = 0;
+    let untested = 0;
+    for (const c of WSTG) {
+      const st = cov[c.id]?.status ?? "untested";
+      if (st === "n/a") continue;
+      applicable++;
+      if (st === "untested" || st === "in_progress") untested++;
+    }
+    if (applicable) apps.push({ origin: String(app.attributes.origin ?? app.naturalKey), untested, applicable });
+  }
+  const untested = apps.reduce((n, a) => n + a.untested, 0);
+  const applicable = apps.reduce((n, a) => n + a.applicable, 0);
+  const tooLittle = engagement.info.mode === "web" && (!applicable || untested / applicable > MAX_UNTESTED_SHARE);
+  return { determined: phases.length === 0 && !tooLittle, phases, untested, applicable, apps: apps.filter((a) => a.untested) };
+}
+
+/** What keeps a report from being final: the executive summary, and coverage (unless a person accepted its limits). */
+export function reportReadiness(engagement: Engagement, limitations?: string): { final: boolean; missing: Array<"executive_summary" | "coverage">; coverage: AssessmentCoverage } {
+  const coverage = assessmentCoverage(engagement);
+  const missing: Array<"executive_summary" | "coverage"> = [
+    ...(engagement.getMeta<{ executiveSummary?: string }>("report")?.executiveSummary?.trim() ? [] : (["executive_summary"] as const)),
+    ...(coverage.determined || limitations?.trim() ? [] : (["coverage"] as const)),
+  ];
+  return { final: missing.length === 0, missing, coverage };
+}
+
+const ULID = /\b[0-9A-HJKMNP-TV-Z]{26}\b/g;
+
+/**
+ * What a report reader must never see: Penteos's internal ids (replaced by what they name: a
+ * finding's title, an evidence's caption) and saved-credential markers (named, never shown). Inside
+ * fenced blocks only the credential markers change: the rest is evidence, kept as captured.
+ */
+function forReaders(engagement: Engagement, text: string, secretRef: string): string {
+  const name = (id: string): string | undefined => {
+    const e = engagement.get(id);
+    if (!e) return undefined;
+    const a = e.attributes as Record<string, unknown>;
+    return String(a.title ?? a.caption ?? a.origin ?? a.fqdn ?? a.ip ?? a.name ?? "").trim() || undefined;
+  };
+  const secrets = (s: string) => s.replace(/\{\{secret:[A-Za-z0-9_.-]+\}\}/g, secretRef);
+  const prose = (s: string) => secrets(s).replace(ULID, (id) => {
+    const n = name(id);
+    return n === undefined ? id : `«${n}»`;
+  });
+  // Fenced blocks close with a fence at least as long as the one that opened them (evidence that
+  // itself contains ``` is wrapped in ````).
+  let out = "";
+  let last = 0;
+  for (const m of text.matchAll(/^(`{3,})[^\n]*\n[\s\S]*?^\1`*[ \t]*$/gm)) {
+    out += prose(text.slice(last, m.index)) + secrets(m[0]);
+    last = m.index + m[0].length;
+  }
+  return out + prose(text.slice(last));
 }
 
 /** What the executive report keeps. */
@@ -166,7 +256,7 @@ export function renderReport(engagement: Engagement, options: ReportOptions = {}
   out.push(`# ${options.title?.trim() || (reportKind === "executive" ? FULL_TEXT[info.language ?? "en"].executiveKind(`${kindTitle} - ${info.name}`) : `${kindTitle} - ${info.name}`)}`, "");
   out.push(`**${T.client}:** ${info.clientName} · **${T.issued}:** ${today}`);
   if (info.startsAt || info.endsAt) out.push(T.period(info.startsAt?.slice(0, 10) ?? "?", info.endsAt?.slice(0, 10) ?? "?"));
-  if (options.includeDrafts) out.push("", T.draftBanner);
+  if (options.includeDrafts || options.markDraft) out.push("", T.draftBanner);
   out.push("");
 
   const F = FULL_TEXT[info.language ?? "en"];
@@ -190,11 +280,17 @@ export function renderReport(engagement: Engagement, options: ReportOptions = {}
 
   section("executive_summary", T.executiveSummary);
   {
-    // The overall risk, from the most serious finding delivered.
-    const worst = ORDER.find((sev) => findings.some((f) => attrs(f).severity === sev && sev !== "info"));
-    const level = worst ? F.riskLevels[worst as "critical" | "high" | "medium" | "low"] : F.riskLevels.none;
+    // The overall risk: from the most serious finding, but only as far as the coverage reached
+    // allows. With too little tested it is "not determined" ("at least High" if a high or critical
+    // was found anyway), with what was not done written out; a person may accept those limits.
+    const worst = ORDER.find((sev) => findings.some((f) => attrs(f).severity === sev && sev !== "info")) as "critical" | "high" | "medium" | "low" | undefined;
+    const coverage = assessmentCoverage(engagement);
+    const accepted = options.limitations?.trim();
+    const level = coverage.determined || accepted ? (worst ? F.riskLevels[worst] : F.riskLevels.none) : worst === "critical" || worst === "high" ? F.riskAtLeast(F.riskLevels[worst]) : F.riskUndetermined;
     const top = findings[0] && attrs(findings[0]).severity !== "info" ? attrs(findings[0]).title : "";
     out.push(F.riskLine(level, findings.length, top), "");
+    if (!coverage.determined) out.push(F.coverageCaveat(coverage), "");
+    if (accepted) out.push(`**${F.acceptedLimitations}:** ${accepted}`, "");
   }
   out.push(draft?.executiveSummary?.trim() || pending, "");
   const serious = findings.filter((f) => attrs(f).severity === "critical" || attrs(f).severity === "high").slice(0, 5);
@@ -231,7 +327,8 @@ export function renderReport(engagement: Engagement, options: ReportOptions = {}
     const phases = plan.phases.filter((p) => p.status !== "pending" || p.summary);
     if (phases.length) {
       out.push(F.phasesHead, "|---|---|---|");
-      for (const p of plan.phases) out.push(`| ${cell(p.title)} | ${F.phaseStatus[p.status]} | ${cell(firstSentence(p.summary ?? p.goal ?? ""))} |`);
+      // The reporting phase is this very document: never "not carried out" inside it.
+      for (const p of plan.phases) out.push(`| ${cell(p.title)} | ${F.phaseStatus[p.id === "reporting" && p.status === "pending" ? "current" : p.status]} | ${cell(firstSentence(p.summary ?? p.goal ?? ""))} |`);
       out.push("");
     }
   }
@@ -482,6 +579,25 @@ export function renderReport(engagement: Engagement, options: ReportOptions = {}
       out.push("");
     }
   }
+  // What reconnaissance found outside the scope: untested, said so, with what is known of each.
+  {
+    const seen = new Set<string>();
+    const lines: string[] = [];
+    for (const kind of ["webapp", "domain", "host"] as const) {
+      for (const e of engagement.query({ kind, limit: 2000 })) {
+        if (!e.outOfScope) continue;
+        const a = e.attributes as Record<string, unknown>;
+        const name = String(a.origin ?? a.fqdn ?? a.ip ?? "");
+        const host = name.replace(/^[a-z]+:\/\//, "").replace(/:\d+$/, "");
+        if (!name || seen.has(host)) continue;
+        seen.add(host);
+        const tech = Array.isArray(a.technologies) ? (a.technologies as Array<{ name?: string }>).map((t) => t.name).filter(Boolean).slice(0, 4).join(", ") : "";
+        const about = [a.title ? String(a.title) : "", tech].filter(Boolean).join(" · ");
+        lines.push(`- \`${name}\`${about ? ` - ${cell(about)}` : ""}`);
+      }
+    }
+    if (lines.length) out.push(`**${F.discoveredTitle}**`, "", F.discoveredIntro, "", ...lines.slice(0, 60), "");
+  }
 
   if (draft?.conclusion?.trim()) {
     section("conclusion", T.conclusion);
@@ -497,11 +613,13 @@ export function renderReport(engagement: Engagement, options: ReportOptions = {}
     out.push("");
   }
 
-  // Which tools were used, how often and when; and the commands themselves (secrets never shown).
-  if (runsAll.length) {
+  // Which tools were used against the targets, how often and when; and the commands themselves
+  // (secrets never shown). Local analysis in the sandbox and tool installs touched nothing: left out.
+  const testing = runsAll.filter((r) => (r.targets?.length ?? 0) > 0);
+  if (testing.length) {
     out.push(`${MARK}tools${MARK}${F.tools}`, "");
     const byTool = new Map<string, { n: number; first: string; last: string }>();
-    for (const r of runsAll) {
+    for (const r of testing) {
       const name = r.tool ?? r.command?.split(/\s+/)[0] ?? "?";
       const cur = byTool.get(name);
       if (!cur) byTool.set(name, { n: 1, first: r.startedAt, last: r.startedAt });
@@ -513,7 +631,7 @@ export function renderReport(engagement: Engagement, options: ReportOptions = {}
     }
     out.push(F.toolsHead, "|---|---|---|---|");
     for (const [t, v] of [...byTool].sort((a, b) => b[1].n - a[1].n)) out.push(`| ${cell(t)} | ${v.n} | ${v.first.slice(0, 16).replace("T", " ")} | ${v.last.slice(0, 16).replace("T", " ")} |`);
-    const commands = runsAll.filter((r) => r.command).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+    const commands = testing.filter((r) => r.command).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
     if (commands.length) {
       out.push("", `### ${F.commandsTitle}`, "", F.commandsHead, "|---|---|---|");
       for (const r of commands.slice(-120)) out.push(`| ${r.startedAt.slice(0, 16).replace("T", " ")} | ${cell(r.tool ?? F.none)} | \`${cell(engagement.redact(String(r.command)).slice(0, 220))}\` |`);
@@ -527,7 +645,7 @@ export function renderReport(engagement: Engagement, options: ReportOptions = {}
     T.annexText(engagement.runs(100000).length) + (audit.ok ? T.auditOk(audit.events) : T.auditBroken(audit.brokenAt)),
     "",
   );
-  return assemble(out, reportKind === "executive" ? { ...options, only: options.only?.length ? options.only.filter((x) => EXECUTIVE_SECTIONS.includes(x)) : EXECUTIVE_SECTIONS } : options);
+  return forReaders(engagement, assemble(out, reportKind === "executive" ? { ...options, only: options.only?.length ? options.only.filter((x) => EXECUTIVE_SECTIONS.includes(x)) : EXECUTIVE_SECTIONS } : options), F.secretRef);
 }
 
 /** The first sentence of a text (a recommendation's main action), at most 220 characters. */
