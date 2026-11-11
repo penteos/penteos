@@ -1,0 +1,57 @@
+name: bench
+
+# The detector bench: Penteos's own checks (no AI) against intentionally vulnerable applications
+# with documented flaws, on GitHub's machines. What each check found or missed is in the run's
+# summary and its artifact. A miss is a measurement; an error running a check fails the run.
+on:
+  workflow_dispatch:
+  push:
+    branches: [mac]
+    paths:
+      - scripts/bench/**
+      - .github/workflows/bench.yml
+      - packages/core/src/**
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      juice:
+        image: bkimminich/juice-shop:latest
+        ports: ["3000:3000"]
+      vampi:
+        image: erev0s/vampi:latest
+        ports: ["5000:5000"]
+        env:
+          vulnerable: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @penteos/schema build
+      - name: Wait for the targets
+        run: |
+          for url in http://127.0.0.1:3000/ http://127.0.0.1:5000/; do
+            for i in $(seq 1 60); do curl -fsS -o /dev/null "$url" && break; sleep 3; done
+            curl -fsS -o /dev/null "$url"
+          done
+      - name: Run the bench
+        working-directory: packages/server
+        run: node --conditions=penteos-source --import tsx ../../scripts/bench/run.mjs http://127.0.0.1:3000 http://127.0.0.1:5000 "$GITHUB_WORKSPACE/bench.md"
+      - name: Summary
+        if: always()
+        run: test -f bench.md && cat bench.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bench
+          path: bench.md
+          if-no-files-found: ignore
