@@ -387,6 +387,23 @@ for (const section of sections) {
   await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
   await sleep(300);
 }
+// Help, Connect an AI: every way to give the Maestro a model, in one window that says what failed.
+{
+  await evaluate(`[...document.querySelectorAll('.menu-title')].find((b) => /^(Ayuda|Help)$/.test(b.textContent.trim()))?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+  await sleep(200);
+  await evaluate(`[...document.querySelectorAll('.menu-item')].find((x) => /Conectar una IA|Connect an AI/.test(x.textContent))?.click()`);
+  await sleep(800);
+  const options = await evaluate(`[...document.querySelectorAll('.connect-option b')].map((b) => b.textContent)`);
+  writeFileSync(join(out, "connect-ai.png"), Buffer.from((await send("Page.captureScreenshot", { format: "png" })).result.data, "base64"));
+  const hasChatgpt = options.includes("ChatGPT");
+  const hasKeys = options.some((o) => /DeepSeek|OpenAI|Claude|Anthropic/.test(o));
+  await evaluate(`[...document.querySelectorAll('.modal .btn.ghost')].find((b) => /Más tarde|Later/.test(b.textContent))?.click()`);
+  await sleep(300);
+  const closed = await evaluate(`!document.querySelector('.connect')`);
+  const ok = hasChatgpt && hasKeys && closed;
+  if (!ok) failed++;
+  console.log(`${ok ? "ok " : "FAIL"} connect an AI: ${options.length} option(s) (${options.join(", ")}), later ${closed ? "closes it" : "did not close it"}`);
+}
 // Help, About Penteos: the author, a way to reach them, and where the project lives.
 {
   await evaluate(`[...document.querySelectorAll('.menu-title')].find((b) => /^(Ayuda|Help)$/.test(b.textContent.trim()))?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);

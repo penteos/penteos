@@ -107,6 +107,7 @@ const shell: Record<string, string> = {
   "help.modes": "Project types",
   "help.keys": "Keyboard shortcuts",
   "help.welcome": "Open the setup assistant",
+  "help.connectAI": "Connect an AI",
   "help.about": "About Penteos",
   "update.available": "Penteos {version} is available",
   "update.youHave": "you have {version}",

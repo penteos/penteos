@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CoreClient } from "./client";
 import { AgentSidebar } from "./panels/AgentSidebar";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
+import { ConnectAI, openConnectAI } from "./ui/ConnectAI";
 import { importFile } from "./ui/importFile";
 import { ModePicker, ProjectWizard } from "./ProjectWizard";
 import { ALL_SECTIONS, loadShowAll, modeOf, saveShowAll } from "./modes";
@@ -410,6 +411,7 @@ function Shell(props: {
         { label: t("shell.update.check"), disabled: !window.penteosDesktop?.updates, onClick: () => void checkForUpdates() },
         { label: t("shell.update.automatic"), disabled: !window.penteosDesktop?.updates, checked: updates?.automatic !== false, onClick: () => void setAutomaticUpdates(updates?.automatic === false) },
         "sep",
+        { label: t("shell.help.connectAI"), onClick: () => openConnectAI() },
         { label: t("shell.help.about"), onClick: () => setHelp("about") },
       ],
     },
@@ -471,7 +473,8 @@ function Shell(props: {
       <StatusBar bottomOpen={sizes.bottomOpen} openBottom={openBottom} openAgent={() => setSizes((s) => ({ ...s, agentOpen: true }))} />
       {props.palette ? <Palette onClose={() => props.setPalette(false)} onStop={() => setStopModal(true)} onNew={() => setWizard("new")} /> : null}
       {stopModal ? <StopWorkModal onClose={() => setStopModal(false)} /> : null}
-      {wizard ? <ProjectWizard firstRun={wizard === "first"} onClose={() => setWizard(undefined)} /> : null}
+      {wizard ? <ProjectWizard firstRun={wizard === "first"} onClose={() => { setWizard(undefined); window.dispatchEvent(new Event("penteos:check-ai")); }} /> : null}
+      <ConnectAI />
       {modePicker ? <ModePicker onClose={() => setModePicker(false)} /> : null}
       {levelPicker ? <AiLevelPicker onClose={() => setLevelPicker(false)} /> : null}
       {help ? <HelpModal kind={help} onClose={() => setHelp(undefined)} /> : null}

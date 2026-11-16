@@ -47,6 +47,14 @@ report, and macOS.
 - **A previous assessment** (another team's PDF or Word report) can be loaded as the baseline: the
   report says what was fixed, what is still open and what is new.
 
+### Connecting an AI, foolproof
+- **One window to connect an AI** (ChatGPT, an API key, a local model, an installed CLI), showing
+  only what works on this computer. It opens by itself when the Maestro has no working AI (after
+  the project assistant or at start), and from the Maestro panel and Help at any time. A failed
+  attempt keeps it open with the reason and the way forward.
+- **Sign in with ChatGPT** handles a browser that loads the callback twice (the code is exchanged
+  once), and when it fails it says why, in words and with its code, on the page and in Penteos.
+
 ### Also
 - Rate-limit tests send at least 15 attempts, and a later 429 settles an earlier "no limit".
 - Updates count as installed when the system has the new version, even if the package manager

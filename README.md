@@ -11,6 +11,7 @@
   <a href="https://github.com/penteos/penteos/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/penteos/penteos?color=ff9a2e"></a>
   <a href="https://github.com/penteos/penteos/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/penteos/penteos/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="Linux x86_64 and arm64" src="https://img.shields.io/badge/linux-x86__64%20%C2%B7%20arm64-2a1d48">
+  <img alt="macOS Apple Silicon and Intel" src="https://img.shields.io/badge/macOS-Apple%20Silicon%20%C2%B7%20Intel-2a1d48">
 </p>
 
 <p align="center">
@@ -33,15 +34,17 @@ does the legwork next to you under three rules it cannot break.
 
 ## Install
 
-Linux, x86_64 and arm64. No Docker, and Penteos and its tools run as your user.
+Linux (x86_64 and arm64) and macOS (Apple Silicon and Intel). No Docker, and Penteos and its tools
+run as your user.
 
 ```sh
 curl -fsSL https://github.com/penteos/penteos/releases/latest/download/install.sh | sh
 ```
 
-It picks the right package for your distribution and checks it against the release's `SHA256SUMS`
-before installing anything. Add `-s -- --appimage` to install the AppImage in `~/.local/bin`
-without root. Or download a package directly:
+The same line on Linux and on a Mac, in a terminal. It picks the right package for your system and
+checks it against the release's `SHA256SUMS` before installing anything. On a Mac, Penteos goes to
+Applications, needs no password and opens without a warning. On Linux, add `-s -- --appimage` to
+install the AppImage in `~/.local/bin` without root. Or download a package directly:
 
 | Package | x86_64 | arm64 | For |
 |---|---|---|---|
@@ -49,6 +52,7 @@ without root. Or download a package directly:
 | `.deb` | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-amd64.deb) | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-arm64.deb) | Debian, Ubuntu, Kali, Mint, Pop!_OS |
 | `.rpm` | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-x86_64.rpm) | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-aarch64.rpm) | Fedora, RHEL, Rocky, openSUSE |
 | `.tar.gz` | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-x64.tar.gz) | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-arm64.tar.gz) | Arch and everything else |
+| **macOS** `.zip` | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-mac-x64.zip) (Intel) | [download](https://github.com/penteos/penteos/releases/latest/download/penteos-mac-arm64.zip) (Apple Silicon) | Prefer the one-line installer: a zip downloaded with a browser needs `xattr -dr com.apple.quarantine /Applications/Penteos.app` once, as the app is not notarized |
 
 ```sh
 chmod +x penteos-x86_64.AppImage && ./penteos-x86_64.AppImage
@@ -56,7 +60,7 @@ chmod +x penteos-x86_64.AppImage && ./penteos-x86_64.AppImage
 sudo apt install ./penteos-amd64.deb
 ```
 
-Every file ships with a checksum: `sha256sum -c SHA256SUMS`.
+Every file ships with a checksum: `sha256sum -c SHA256SUMS --ignore-missing` (on a Mac, `shasum -a 256 -c SHA256SUMS --ignore-missing`).
 
 ## Three rules it cannot break
 

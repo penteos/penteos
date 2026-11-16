@@ -20,6 +20,7 @@ const jwk = { ...publicKey.export({ format: "jwk" }), kid: "k1", alg: "RS256", u
 let dir: string;
 let server: Server;
 let base: string;
+const usedCodes = new Set<string>();
 let auth: ChatGptAuth;
 let seen: { challenge?: string; revoked?: string; responses: Array<Record<string, unknown>>; refreshTokens: string[] };
 let responsesReply: (res: import("node:http").ServerResponse) => void;
@@ -58,6 +59,9 @@ beforeEach(async () => {
         if (form.get("grant_type") === "authorization_code") {
           const challenge = createHash("sha256").update(form.get("code_verifier") ?? "").digest("base64url");
           if (form.get("code") !== "good-code" || challenge !== seen.challenge || form.get("resource") !== "https://api.openai.com/v1") return json(400, { error: "invalid_grant" });
+          // Like OpenAI: a code works once.
+          if (usedCodes.has(String(form.get("code")) + challenge)) return json(400, { error: "invalid_grant" });
+          usedCodes.add(String(form.get("code")) + challenge);
           const now = Math.floor(Date.now() / 1000);
           return json(200, {
             access_token: "at-1",
@@ -137,6 +141,36 @@ it("first sign-in registers this install, keeps the tokens sealed and enables th
   expect(seen.revoked).toBe("rt-2");
   expect(auth.status()).toMatchObject({ signedIn: false, plan: false });
   expect(readFileSync(join(dir, "config", "chatgpt.json"), "utf8")).toContain("oaiapp_123");
+});
+
+it("a callback that arrives twice (a browser preloading it) exchanges the code once and both show it worked", async () => {
+  let resolveDone!: (r: { ok: boolean; error?: string }) => void;
+  const done = new Promise<{ ok: boolean; error?: string }>((r) => (resolveDone = r));
+  const { url } = await auth.begin((r) => resolveDone(r));
+  const authorize = new URL(url);
+  seen.challenge = authorize.searchParams.get("code_challenge") ?? undefined;
+  await fetch(url);
+  const back = new URL(authorize.searchParams.get("redirect_uri")!);
+  back.search = new URLSearchParams({ code: "good-code", state: authorize.searchParams.get("state")!, client_id: "oaiapp_123" }).toString();
+  const pages = await Promise.all([fetch(back).then((r) => r.text()), fetch(back).then((r) => r.text())]);
+  for (const p of pages) expect(p).toContain("Penteos is connected");
+  expect(await done).toEqual({ ok: true });
+});
+
+it("a failure says what went wrong on the page, in words and with its code", async () => {
+  let resolveDone!: (r: { ok: boolean; error?: string }) => void;
+  const done = new Promise<{ ok: boolean; error?: string }>((r) => (resolveDone = r));
+  const { url } = await auth.begin((r) => resolveDone(r));
+  const authorize = new URL(url);
+  seen.challenge = authorize.searchParams.get("code_challenge") ?? undefined;
+  await fetch(url);
+  const back = new URL(authorize.searchParams.get("redirect_uri")!);
+  back.search = new URLSearchParams({ code: "expired-code", state: authorize.searchParams.get("state")!, client_id: "oaiapp_123" }).toString();
+  const page = await fetch(back).then((r) => r.text());
+  expect(page).toContain("The authorization code was already used or expired");
+  expect(page).toContain("token_exchange:invalid_grant");
+  expect(page).toContain("go back to Penteos");
+  expect((await done).error).toMatch(/already used or expired/);
 });
 
 it("an answer that does not carry this attempt's state is refused", async () => {

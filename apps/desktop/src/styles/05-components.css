@@ -447,3 +447,19 @@ textarea.input { height: auto; padding: 7px 8px; resize: vertical; line-height: 
 .report-readiness.final { border-left-color: var(--ok); }
 .report-readiness p { margin: 0; color: var(--fg-1); }
 .report-limitations { display: flex; flex-direction: column; gap: 6px; color: var(--fg-2); font-size: 12px; }
+
+/* Connect an AI: one window, every way to give the Maestro a model */
+.connect { display: flex; flex-direction: column; gap: 8px; width: min(560px, 100%); max-height: min(62vh, 640px); overflow-y: auto; padding-right: 4px; }
+.connect p { margin: 0; }
+.connect-option { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; }
+.connect-option.primary { border-color: var(--accent); padding: 14px; }
+.connect-option > div:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.connect-option > div:first-child .muted { font-size: 12px; }
+.connect-key { grid-column: 1 / -1; display: flex; gap: 8px; }
+.connect-key .input { flex: 1; min-width: 0; }
+.connect-error, .connect-note { grid-column: 1 / -1; }
+.connect-sep { text-align: center; color: var(--fg-3); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin: 2px 0; }
+.connect-error { color: var(--warn); font-size: 13px; }
+.connect-note { font-size: 12px; }
+.connect-done { display: flex; align-items: center; gap: 10px; color: var(--ok); padding: 16px 4px; }
+.no-ai { margin: 10px; padding: 12px 14px; border: 1px solid var(--warn); border-radius: 6px; display: flex; flex-direction: column; gap: 6px; }

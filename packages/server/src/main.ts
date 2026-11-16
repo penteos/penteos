@@ -635,7 +635,11 @@ server.on("upgrade", (req, socket, head) => {
             break;
           }
           try {
-            const { url } = await agents.chatgptSignIn((result) => broadcast({ t: "chatgpt.done", ...result }));
+            const { url } = await agents.chatgptSignIn((result) => {
+              // Why it failed stays in the core's log (never a token): what support needs to see.
+              if (!result.ok) process.stderr.write(`chatgpt sign-in failed: ${result.error}\n`);
+              broadcast({ t: "chatgpt.done", ...result });
+            });
             ws.send(JSON.stringify({ t: "chatgpt.signin", ref: msg.ref, url }));
           } catch (e) {
             ws.send(JSON.stringify({ t: "chatgpt.signin", ref: msg.ref, error: (e as Error).message }));

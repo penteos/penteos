@@ -14,6 +14,7 @@ import { type Provider, ProviderPicker, ProviderSettings, useOutside } from "../
 import { Conversation, type Entry, reduce } from "../ui/Conversation";
 import { WaitingStrip } from "../ui/Waiting";
 import { t, tn } from "../i18n";
+import { openConnectAI } from "../ui/ConnectAI";
 // ---------------------------------------------------------------------------------------------
 // Types and helpers
 // ---------------------------------------------------------------------------------------------
@@ -398,6 +399,14 @@ export function AgentSidebar(props: { width: number; ask?: string; onAskConsumed
       ) : null}
       </div>
 
+      {agent === "maestro" && mayInstruct && !current?.available ? (
+        // No working AI: say so where the operator types, with the one way out.
+        <div className="no-ai">
+          <b>{t("agent.noAi.title")}</b>
+          <span className="muted">{current?.reason ?? t("agent.noAi.body")}</span>
+          <button className="btn primary sm" onClick={() => openConnectAI(current?.reason)}>{t("agent.noAi.connect")}</button>
+        </div>
+      ) : null}
       {agent === "maestro" ? (
         <div className="composer">
           <textarea

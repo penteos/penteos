@@ -53,6 +53,19 @@ export interface ChatGptStatus {
   pending: boolean;
 }
 
+/** What went wrong, for a person: the callback page and the interface say it this way. */
+export function explainFailure(code: string): string {
+  if (/^token_exchange:invalid_grant/.test(code)) return "The authorization code was already used or expired. Start the sign-in again from Penteos.";
+  if (/^token_exchange:invalid_client/.test(code)) return "OpenAI did not accept this app's registration. Sign out in Penteos and sign in again.";
+  if (/^token_exchange/.test(code)) return "OpenAI refused to complete the sign-in.";
+  if (/clock/.test(code)) return "This computer's clock looks wrong: set it to automatic time and try again.";
+  if (/^id_token/.test(code)) return "OpenAI's answer could not be verified.";
+  if (/account_mismatch/.test(code)) return "This Penteos is already connected to another ChatGPT account. Sign out in Penteos first.";
+  if (/fetch failed|ENOTFOUND|ECONN|network|timeout/i.test(code)) return "Penteos could not reach OpenAI (network or proxy).";
+  if (/seal|vault|EACCES|ENOSPC/i.test(code)) return "Penteos could not save the sign-in on this computer.";
+  return "The sign-in could not be completed.";
+}
+
 /** A sign-in that only a new authorization can fix (revoked, expired, disconnected in ChatGPT). */
 export class ChatGptSignedOut extends Error {}
 
@@ -130,16 +143,23 @@ export class ChatGptAuth {
       this.cancel();
       done(result);
     };
+    // The callback can arrive twice (a browser that preloads, a double click, a reload): the code
+    // is exchanged once, and every arrival shows that one outcome.
+    let outcome: Promise<{ ok: boolean; title: string; body: string }> | undefined;
     server.on("request", (req, res) => {
       const url = new URL(req.url ?? "/", redirect);
       if (url.pathname !== CALLBACK_PATH) {
         res.writeHead(404).end();
         return;
       }
-      const page = (title: string, body: string) => {
+      const page = (title: string, body: string, ok = false) => {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(`<!doctype html><meta charset="utf-8"><title>Penteos</title><body style="font:15px system-ui;background:#0b0712;color:#ece6ff;display:grid;place-items:center;height:90vh"><div><h2>${title}</h2><p>${body}</p></div>`);
+        res.end(`<!doctype html><meta charset="utf-8"><title>Penteos</title><body style="font:15px system-ui;background:#0b0712;color:#ece6ff;display:grid;place-items:center;height:90vh;margin:0"><div style="max-width:520px;padding:24px"><h2 style="color:${ok ? "#7ee2a8" : "#ffb38a"}">${title}</h2><p style="line-height:1.5">${body}</p><p style="color:#9a8fb8;font-size:13px">${ok ? "You can close this tab." : "Close this tab and go back to Penteos: the Maestro panel lets you try again or choose another AI."}</p></div>`);
       };
+      if (outcome) {
+        void outcome.then((o) => page(o.title, o.body, o.ok));
+        return;
+      }
       const error = url.searchParams.get("error");
       if (error) {
         page("Not connected", error === "access_denied" ? "Access was declined. You can close this tab." : "ChatGPT returned an error. You can close this tab and try again from Penteos.");
@@ -159,15 +179,15 @@ export class ChatGptAuth {
         return;
       }
       const code = url.searchParams.get("code") ?? "";
-      this.exchange(clientId, code, verifier, redirect, nonce)
-        .then(() => {
-          page("Penteos is connected", "Your ChatGPT plan is ready. You can close this tab and go back to Penteos.");
-          finish({ ok: true });
-        })
-        .catch((e: Error) => {
-          page("Not connected", "The sign-in could not be completed. Try again from Penteos.");
-          finish({ ok: false, error: e.message });
-        });
+      outcome = this.exchange(clientId, code, verifier, redirect, nonce).then(
+        () => ({ ok: true, title: "Penteos is connected", body: "Your ChatGPT plan is ready. Go back to Penteos." }),
+        (e: Error) => ({ ok: false, title: "Not connected", body: `${explainFailure(e.message)} <span style="color:#9a8fb8">(${e.message.replace(/[<>&]/g, "")})</span>` }),
+      );
+      void outcome.then((o) => {
+        page(o.title, o.body, o.ok);
+        // The listener stays a moment for a second arrival of the same callback, then goes.
+        setTimeout(() => finish(o.ok ? { ok: true } : { ok: false, error: o.body.replace(/<[^>]+>/g, "") }), 3000);
+      });
     });
     // Nobody signs in for five minutes: the listener goes.
     const timer = setTimeout(() => finish({ ok: false, error: "timeout" }), 5 * 60_000);
@@ -204,7 +224,7 @@ export class ChatGptAuth {
       body: new URLSearchParams({ grant_type: "authorization_code", client_id: clientId, code, code_verifier: verifier, redirect_uri: redirect, resource: OPENAI.api }),
     });
     const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!res.ok) throw new Error(String(body.error ?? `token exchange failed (${res.status})`));
+    if (!res.ok) throw new Error(`token_exchange:${String(body.error ?? res.status)}${body.error_description ? `: ${String(body.error_description).slice(0, 160)}` : ""}`);
     const claims = await this.verifyIdToken(String(body.id_token ?? ""), clientId, nonce);
     // A returning registration belongs to one account: another account's tokens never replace it.
     if (this.state.subject && this.state.clientId === clientId && claims.sub !== this.state.subject) throw new Error("account_mismatch");
@@ -233,7 +253,12 @@ export class ChatGptAuth {
     if (!h || !p || !s) throw new Error("id_token missing");
     const header = JSON.parse(Buffer.from(h, "base64url").toString("utf8")) as { alg?: string; kid?: string };
     if (header.alg !== "RS256") throw new Error("id_token algorithm");
-    const keys = await this.keys();
+    let keys = await this.keys();
+    // A key OpenAI added since the last fetch: fetch them again before giving up.
+    if (header.kid && !keys.some((k) => k.kid === header.kid)) {
+      this.jwks = undefined;
+      keys = await this.keys();
+    }
     const jwk = keys.find((k) => k.kid === header.kid) ?? (keys.length === 1 ? keys[0] : undefined);
     if (!jwk) throw new Error("id_token key unknown");
     const ok = verifySignature("RSA-SHA256", Buffer.from(`${h}.${p}`), createPublicKey({ key: jwk, format: "jwk" }), Buffer.from(s, "base64url"));
@@ -241,7 +266,12 @@ export class ChatGptAuth {
     const claims = JSON.parse(Buffer.from(p, "base64url").toString("utf8")) as Record<string, unknown>;
     const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
     const now = Date.now() / 1000;
-    if (claims.iss !== this.endpoints.issuer || !aud.includes(clientId) || typeof claims.exp !== "number" || claims.exp < now - 60 || claims.nonce !== nonce || !claims.sub) throw new Error("id_token claims");
+    // Each claim checked on its own, so a failure says which; five minutes of clock skew tolerated.
+    if (claims.iss !== this.endpoints.issuer) throw new Error(`id_token issuer (${String(claims.iss)})`);
+    if (!aud.includes(clientId)) throw new Error("id_token audience");
+    if (typeof claims.exp !== "number" || claims.exp < now - 300) throw new Error("id_token expired (check this computer's clock)");
+    if (claims.nonce !== nonce) throw new Error("id_token nonce");
+    if (!claims.sub) throw new Error("id_token subject");
     return claims;
   }
 
