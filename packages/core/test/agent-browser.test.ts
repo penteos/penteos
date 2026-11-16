@@ -102,7 +102,7 @@ type Done = { status: string; page: { title: string; text: string; forms: Array<
 
 it.skipIf(!chrome)("opens a JavaScript page through the proxy and sees what its code renders", async () => {
   const r = (await executeOperation("browser.open", { url: `${origin}/` }, ctx())) as Done;
-  expect(r.status).toBe("done");
+  expect(r.status, JSON.stringify(r).slice(0, 600)).toBe("done");
   expect(r.page.title).toBe("Inventario");
   expect(r.page.text).toContain("tornillos");
   expect(r.requests.some((q) => q.url.endsWith("/api/items") && q.status === 200)).toBe(true);
