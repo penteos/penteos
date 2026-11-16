@@ -113,6 +113,8 @@ const call = (fn: (...args: never[]) => unknown, ...args: unknown[]) =>
 class EngagementBrowser {
   private process?: ChildProcess;
   private profile?: string;
+  /** The last of what the browser printed while starting, for the error when it does not. */
+  private startLog = "";
   private cdp?: Cdp;
   private session?: string;
   private queue: Promise<unknown> = Promise.resolve();
@@ -183,9 +185,18 @@ class EngagementBrowser {
         "--window-size=1366,900",
         "about:blank",
       ],
-      { output: "ignore" },
+      { output: "pipe" },
     );
-    this.process.once("exit", () => this.shutdown());
+    // What Chrome says when it fails to start (a sandbox it cannot set up, a missing library) is
+    // kept, a little of it, so the error says why instead of only that it did not start.
+    this.startLog = "";
+    const keep = (d: Buffer) => (this.startLog = (this.startLog + String(d)).slice(-1500));
+    this.process.stdout?.on("data", keep);
+    this.process.stderr?.on("data", keep);
+    this.process.once("exit", (code, signal) => {
+      this.startLog += `\n(exited ${signal ?? code})`;
+      this.shutdown();
+    });
     const endpoint = await this.devtoolsEndpoint();
     this.cdp = await Cdp.connect(endpoint);
     // Chrome makes a new page; Penteos's own browser has one ready (Electron does not create targets).
@@ -217,7 +228,8 @@ class EngagementBrowser {
       await new Promise((r) => setTimeout(r, 100));
     }
     this.shutdown();
-    throw new Error("the browser did not start");
+    const said = this.startLog.trim().split("\n").filter(Boolean).slice(-6).join(" | ");
+    throw new Error(`the browser did not start${said ? `: ${said}` : ""}`);
   }
 
   private listen(): void {
