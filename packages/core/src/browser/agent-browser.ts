@@ -217,10 +217,15 @@ class EngagementBrowser {
     await this.cdp.send("Fetch.enable", { handleAuthRequests: true, patterns: [{ urlPattern: "*" }] }, sessionId);
   }
 
-  /** The DevTools address Chromium writes once it is listening. */
+  /**
+   * The DevTools address Chromium writes once it is listening. A busy or slow machine (a CI runner,
+   * an old laptop under a scan) can take well over ten seconds to start it: wait up to thirty, and
+   * stop waiting as soon as the process is gone.
+   */
   private async devtoolsEndpoint(): Promise<string> {
     const file = join(this.profile!, "DevToolsActivePort");
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 300; i++) {
+      if (this.startLog.includes("\n(exited ")) break;
       if (existsSync(file)) {
         const [port, path] = readFileSync(file, "utf8").split("\n");
         if (port && path) return `ws://127.0.0.1:${port.trim()}${path.trim()}`;
@@ -228,7 +233,13 @@ class EngagementBrowser {
       await new Promise((r) => setTimeout(r, 100));
     }
     this.shutdown();
-    const said = this.startLog.trim().split("\n").filter(Boolean).slice(-6).join(" | ");
+    // Chrome's own noise (no D-Bus session on a server, GPU probing) says nothing about why it failed.
+    const said = this.startLog
+      .trim()
+      .split("\n")
+      .filter((l) => l && !/dbus\/bus\.cc|Failed to connect to the bus|viz_main_impl|gpu_init|GL implementation|sandbox_linux/i.test(l))
+      .slice(-6)
+      .join(" | ");
     throw new Error(`the browser did not start${said ? `: ${said}` : ""}`);
   }
 
