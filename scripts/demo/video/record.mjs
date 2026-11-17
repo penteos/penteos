@@ -94,15 +94,28 @@ const on = (x = {}) => ({ engagementId, ...x });
 await api("engagement.update", on({ maxRisk: "exploitation", autonomy: "maestro_auto" }));
 await api("tool.set_auto_install", on({ enabled: true, maxMB: 3000 }));
 // The workbench opens the operator's active project: make it this one (the core started on the
-// lab project it creates on a first run).
-{
-  const WS = createRequire(join(root, "packages", "server", "package.json"))("ws");
-  const sock = new WS(`ws://127.0.0.1:${ready.port}/v0/ws?token=${ready.token}`);
-  await new Promise((ok, fail) => (sock.on("open", ok), sock.on("error", fail)));
-  sock.send(JSON.stringify({ t: "activate", engagementId }));
-  await sleep(800);
-  sock.close();
-}
+// lab project it creates on a first run). The same connection later asks whether the Maestro is
+// still working (the core knows; the screen only suggests it).
+const WS = createRequire(join(root, "packages", "server", "package.json"))("ws");
+const coreWs = new WS(`ws://127.0.0.1:${ready.port}/v0/ws?token=${ready.token}`);
+await new Promise((ok, fail) => (coreWs.on("open", ok), coreWs.on("error", fail)));
+coreWs.send(JSON.stringify({ t: "activate", engagementId }));
+await sleep(800);
+let historyRef = 0;
+const maestroState = () =>
+  new Promise((ok) => {
+    const ref = `h${++historyRef}`;
+    const onMsg = (m) => {
+      const msg = JSON.parse(String(m));
+      if (msg.t === "agent.history" && msg.ref === ref) {
+        coreWs.off("message", onMsg);
+        ok({ running: Boolean(msg.running), parked: Boolean(msg.parked) });
+      }
+    };
+    coreWs.on("message", onMsg);
+    coreWs.send(JSON.stringify({ t: "agent.history", ref }));
+    setTimeout(() => (coreWs.off("message", onMsg), ok({ running: false, parked: false, unknown: true })), 5000);
+  });
 // The usual web kit, installed before filming (verified downloads; nothing to watch).
 for (const tool of DRY ? [] : ["httpx", "katana", "nuclei", "ffuf"]) {
   try {
@@ -273,7 +286,10 @@ await sleep(4000);
 scene("lapse");
 await caption("Autopilot", "It maps, tests and proves. <em>Every step inside the scope.</em>");
 await stage(`cursor(false)`);
-const running = () => stage(`exists({ text: "Stop", sel: ".composer button" })`);
+const running = async () => {
+  const st = await maestroState();
+  return st.running || st.parked || Boolean(st.unknown);
+};
 if (!DRY) {
   const panels = ["coverage", "findings", "board", "hosts", "findings"];
   let shown = -1;
@@ -297,7 +313,8 @@ if (!DRY) {
     }
     await sleep(10_000);
   }
-  if (await running()) await stage(`click({ text: "Stop", sel: ".composer button" })`);
+  if ((await maestroState()).running) coreWs.send(JSON.stringify({ t: "agent.stop" }));
+  await sleep(3000);
   run.maestroMinutes = Math.round((Date.now() - maestroStart) / 6000) / 10;
   run.lapse = { from: lapseFrom, to: frames.length };
   await stage(`lapse(false)`);
