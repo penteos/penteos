@@ -286,9 +286,13 @@ await sleep(4000);
 scene("lapse");
 await caption("Autopilot", "It maps, tests and proves. <em>Every step inside the scope.</em>");
 await stage(`cursor(false)`);
+// Working: the Maestro in a turn, parked, or a tool of its still running (it waits for runs between
+// turns and is woken when they finish).
 const running = async () => {
   const st = await maestroState();
-  return st.running || st.parked || Boolean(st.unknown);
+  if (st.running || st.parked || st.unknown) return true;
+  const runs = await api("run.list", on({ limit: 50 })).catch(() => []);
+  return (Array.isArray(runs) ? runs : (runs.runs ?? [])).some((r) => r.status === "running" || r.status === "queued" || r.status === "pending");
 };
 if (!DRY) {
   // The camera follows the work: whatever just appeared is what it shows (a new finding opened,
@@ -332,8 +336,12 @@ if (!DRY) {
     }
     if (!(await running())) {
       // Finished, or waiting on the operator: give it a moment to start again before calling it done.
-      await sleep(20_000);
-      if (!(await running())) break;
+      let quiet = true;
+      for (let i = 0; i < 6 && quiet; i++) {
+        await sleep(15_000);
+        quiet = !(await running());
+      }
+      if (quiet) break;
     }
     await sleep(10_000);
   }
