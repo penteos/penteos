@@ -7,6 +7,7 @@ import { type OperationContext, Vault } from "@penteos/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { ChatGptAuth } from "../src/agents/chatgpt-auth.js";
 import { ChatGptPlanSession } from "../src/agents/providers/chatgpt.js";
+import { ProviderFailure } from "../src/agents/failover.js";
 import type { AgentEvent, TurnContext } from "../src/agents/types.js";
 
 /**
@@ -229,8 +230,11 @@ it("a plan limit is said plainly, with where to manage usage", async () => {
     res.writeHead(429, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: { code: "subscription_sharing_usage_limit_exceeded", message: "limit", type: "usage" } }));
   };
+  // Said plainly, and thrown as a failure another AI can carry on from (the Maestro's failover
+  // shows it in its message when no other AI is left).
   const events: AgentEvent[] = [];
-  await new ChatGptPlanSession(auth, undefined).send("go", turn(events));
-  const error = events.find((e) => e.kind === "error") as { text: string } | undefined;
-  expect(error?.text).toContain("chatgpt.com/settings/usage");
+  const failure = await new ChatGptPlanSession(auth, undefined).send("go", turn(events)).catch((e: Error) => e);
+  expect(failure).toBeInstanceOf(ProviderFailure);
+  expect((failure as ProviderFailure).kind).toBe("quota");
+  expect((failure as Error).message).toContain("chatgpt.com/settings/usage");
 });

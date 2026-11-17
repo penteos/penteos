@@ -14,6 +14,7 @@ import { systemPrompt } from "./tools.js";
 import { Verifier, type VerifierProvider } from "./verifier.js";
 import { msg } from "./messages.js";
 import { memoryBudget } from "./memory.js";
+import { classifyFailure, Cooldowns, type FailureKind, handOver, type Rest } from "./failover.js";
 import { type AgentEvent, foldDelta, type ProviderId, type ProviderSession, type ProviderSettings, type SalaCard } from "./types.js";
 
 /** How many times the agent may continue on its own (news only) per operator message. */
@@ -56,6 +57,9 @@ interface Conversation {
   /** Plugin failures already told to the Maestro (key → when), so one failure is told once. */
   pluginFailures?: Map<string, number>;
   saveTimer?: ReturnType<typeof setTimeout>;
+  /** Paused for want of an AI (failover.ts): why, and until when the AI rests. */
+  halted?: { kind: FailureKind; until: number };
+  haltTimer?: ReturnType<typeof setTimeout>;
 }
 
 interface StoredConversation {
@@ -225,6 +229,8 @@ export class AgentManager {
   private readonly conversations = new Map<string, Conversation>();
   private readonly listening = new Set<string>();
   private statusCache: { at: number; list: ProviderStatus[] } | undefined;
+  /** AIs resting after a failure (failover.ts). */
+  private readonly cooldowns = new Cooldowns();
   readonly chatgpt: ChatGptAuth;
 
   constructor(
@@ -451,6 +457,8 @@ export class AgentManager {
       else next[key] = settings[key];
     }
     this.config.providers[id] = next;
+    // New settings (a key topped up or replaced): the AI may work again at once.
+    this.cooldowns.clear(id);
     this.persist();
   }
 
@@ -484,6 +492,11 @@ export class AgentManager {
       // A plugin's provider sends the project's data to a third party: only where the plugin is enabled.
       const owner = this.allSpecs().find((s) => s.id === p.id)?.plugin?.pluginId;
       if (owner && !enabledPlugins.includes(owner)) return { ...shown, available: false, reason: msg(lang, "provider.pluginOff") };
+      const rest = shown.available ? this.cooldowns.active(p.id) : undefined;
+      if (rest) {
+        const at = (t: number) => new Date(t).toLocaleTimeString(lang === "es" ? "es" : "en", { hour: "2-digit", minute: "2-digit" });
+        return { ...shown, available: false, reason: msg(lang, `provider.rest.${rest.kind}`, { since: at(rest.since), until: at(rest.until) }) };
+      }
       return shown;
     });
     return { ...(this.config.selected ? { selected: this.config.selected } : {}), providers: list };
@@ -940,7 +953,26 @@ export class AgentManager {
       return;
     }
     const { providers } = await this.providers(engagementId);
-    const status = providers.find((p) => p.id === providerId);
+    let status = providers.find((p) => p.id === providerId);
+    // The chosen AI is resting after a failure (failover.ts): another one carries on, or the round
+    // stays paused with the reason.
+    const resting = this.cooldowns.active(providerId);
+    if (resting) {
+      const next = this.nextProvider(providers, new Set([providerId]));
+      if (!next && !options.auto) {
+        // No other AI, and the operator says go on (they may have topped up): try it again now.
+        this.cooldowns.clear(providerId);
+        this.statusCache = undefined;
+        status = (await this.providers(engagementId)).providers.find((p) => p.id === providerId);
+      } else if (!next) {
+        this.stopForNoAi(engagementId, conversation, emit, status?.label ?? providerId, resting);
+        return;
+      } else {
+        emit({ kind: "status", text: msg(this.lang(engagementId), "failover.redirect", { from: status?.label ?? providerId, to: next.label, until: this.clock(engagementId, resting.until) }) });
+        providerId = next.id;
+        status = next;
+      }
+    }
     if (!status?.available) {
       emit({ kind: "error", text: status?.reason ?? msg(this.lang(engagementId), "error.unknownProvider") });
       return;
@@ -960,6 +992,7 @@ export class AgentManager {
 
     // A message from the operator resets the self-continuation budget; pending news travel with it.
     if (!options.auto) {
+      conversation.halted = undefined;
       conversation.autoTurns = 0;
       resetRepeatGuard(this.caller.actor.id);
     }
@@ -992,34 +1025,124 @@ export class AgentManager {
 
     // Copilot: the Maestro suggests and the operator executes, so every target action asks.
     const caller: Caller = info.autonomy === "copilot" ? { ...this.caller, policy: { type: "agent", autonomy: "with_approval", maxRisk: "passive" } } : this.caller;
-    const system = this.withSkills(systemPrompt(info, status.kind === "cli" ? "mcp" : "tools", conversation.lang ?? this.lang(engagementId)), engagement);
-    // What the model is about to read: through the leak meter.
-    // The operator's words and the news may carry the client's data too: masked like any result.
-    const local = status.kind === "local";
-    const toModel = textForModel(engagement, prompt, { local });
-    meterEgress(engagement, "system", system);
-    meterEgress(engagement, "prompt", toModel);
+    let current: ProviderId = providerId;
+    let currentStatus: ProviderStatus = status;
+    let input = prompt;
+    const tried = new Set<ProviderId>([providerId]);
     try {
-      await conversation.session.send(toModel, {
-        system,
-        ops: { ...this.makeContext(caller, engagementId), modelIsLocal: local },
-        caller,
-        settings: this.settings(providerId),
-        workDir: join(engagement.dir, "agent"),
-        dataDir: this.dataDir,
-        emit,
-        signal: controller.signal,
-        lang: this.lang(engagementId),
-        memoryTokens: memoryBudget(local),
-      });
-    } catch (error) {
-      if (!controller.signal.aborted) emit({ kind: "error", text: (error as Error).message });
+      // One AI after another while they fail for a reason another can carry on from (failover.ts).
+      for (;;) {
+        const system = this.withSkills(systemPrompt(info, currentStatus.kind === "cli" ? "mcp" : "tools", conversation.lang ?? this.lang(engagementId)), engagement);
+        // What the model is about to read: through the leak meter.
+        // The operator's words and the news may carry the client's data too: masked like any result.
+        const local = currentStatus.kind === "local";
+        const toModel = textForModel(engagement, input, { local });
+        meterEgress(engagement, "system", system);
+        meterEgress(engagement, "prompt", toModel);
+        let failure: FailureKind | undefined;
+        let detail = "";
+        try {
+          await conversation.session!.send(toModel, {
+            system,
+            ops: { ...this.makeContext(caller, engagementId), modelIsLocal: local },
+            caller,
+            settings: this.settings(current),
+            workDir: join(engagement.dir, "agent"),
+            dataDir: this.dataDir,
+            emit,
+            signal: controller.signal,
+            lang: this.lang(engagementId),
+            memoryTokens: memoryBudget(local),
+          });
+          this.cooldowns.succeeded(current);
+          break;
+        } catch (error) {
+          if (controller.signal.aborted) break;
+          detail = (error as Error).message ?? String(error);
+          failure = classifyFailure(error);
+          if (!failure) {
+            emit({ kind: "error", text: detail });
+            break;
+          }
+        }
+        const rest = this.cooldowns.mark(current, failure, detail);
+        engagement.audit(this.caller.actor, "agent.failover", { provider: current }, { kind: failure, detail: detail.slice(0, 200) });
+        const next = this.nextProvider((await this.providers(engagementId)).providers, tried);
+        if (!next) {
+          this.stopForNoAi(engagementId, conversation, emit, currentStatus.label, rest);
+          break;
+        }
+        emit({ kind: "status", text: msg(this.lang(engagementId), `failover.${failure}`, { from: currentStatus.label, to: next.label, detail: detail.length > 140 ? `${detail.slice(0, 140)}…` : detail }) });
+        // A new conversation with the next AI, which gets the round handed over.
+        const spec = this.allSpecs().find((x) => x.id === next.id);
+        if (!spec) break;
+        tried.add(next.id);
+        conversation.provider = next.id;
+        conversation.session = spec.create();
+        conversation.toldLang = operatorLang;
+        input = handOver(conversation.events, currentStatus.label, prompt);
+        current = next.id;
+        currentStatus = next;
+      }
     } finally {
       conversation.running = undefined;
       if (controller.signal.aborted) emit({ kind: "status", text: msg(this.lang(engagementId), "status.stopped") });
-      emit({ kind: "done", provider: providerId, at: new Date().toISOString() });
-      // News that arrived while working.
-      if (!controller.signal.aborted) setTimeout(() => void this.continueWithNews(engagementId), 500);
+      emit({ kind: "done", provider: current, at: new Date().toISOString() });
+      // News that arrived while working (not while the round is paused for want of an AI).
+      if (!controller.signal.aborted && !conversation.halted) setTimeout(() => void this.continueWithNews(engagementId), 500);
     }
+  }
+
+  /**
+   * The next AI that can carry the round: the operator's choice first, then APIs and the ChatGPT
+   * plan in the listed order, then a configured local model. Never an installed CLI (Claude Code,
+   * Codex): that is a person's own subscription, used when they pick it, not taken over by itself.
+   */
+  private nextProvider(providers: ProviderStatus[], exclude: Set<ProviderId>): ProviderStatus | undefined {
+    const listed = providers.filter((p) => p.kind !== "cli").sort((a, b) => (a.kind === "local" ? 1 : 0) - (b.kind === "local" ? 1 : 0));
+    const order = [this.config.selected, ...listed.map((p) => p.id)].filter((x): x is ProviderId => Boolean(x));
+    for (const id of order) {
+      if (exclude.has(id)) continue;
+      const p = providers.find((x) => x.id === id);
+      if (p?.available && p.kind !== "cli" && !this.cooldowns.active(id)) return p;
+    }
+    return undefined;
+  }
+
+  /**
+   * No AI left: the round stops in order. One clear message (what happened, what to do), the AI
+   * shown as unavailable (so the panel offers to connect one), and, when the cause lifts by itself,
+   * the round picks up again when the rest is over (in autopilot) or says the AI is back.
+   */
+  private stopForNoAi(engagementId: string, conversation: Conversation, emit: (e: AgentEvent) => void, label: string, rest: Rest): void {
+    const L = this.lang(engagementId);
+    emit({ kind: "error", text: msg(L, `failover.stop.${rest.kind}`, { provider: label, until: this.clock(engagementId, rest.until), detail: rest.detail.replace(/[.\s]+$/, "") }) });
+    conversation.halted = { kind: rest.kind, until: rest.until };
+    this.statusCache = undefined;
+    if (conversation.haltTimer) clearTimeout(conversation.haltTimer);
+    if (rest.kind !== "rate" && rest.kind !== "down") return;
+    conversation.haltTimer = setTimeout(() => {
+      conversation.haltTimer = undefined;
+      if (!conversation.halted || conversation.running) return;
+      conversation.halted = undefined;
+      this.statusCache = undefined;
+      const say = this.emitter(engagementId, conversation);
+      let auto = false;
+      try {
+        auto = isAutoPilot(this.workspace.get(engagementId).info.autonomy);
+      } catch {
+        /* the project is gone */
+      }
+      say({ kind: "status", text: msg(this.lang(engagementId), auto ? "failover.back.auto" : "failover.back.manual", { provider: label }) });
+      if (!auto) return;
+      conversation.notices.push("The AI is answering again after a pause. Read engagement.brief and the board, then continue the plan where it stopped, without repeating what is already recorded.");
+      void this.continueWithNews(engagementId);
+    }, Math.max(1000, rest.until - Date.now() + 2000));
+    conversation.haltTimer.unref?.();
+  }
+
+  /** A time of day as the project's readers write it. */
+  private clock(engagementId: string, at: number): string {
+    return new Date(at).toLocaleTimeString(this.lang(engagementId) === "es" ? "es" : "en", { hour: "2-digit", minute: "2-digit" });
   }
 }

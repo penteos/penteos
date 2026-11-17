@@ -293,7 +293,13 @@ export function AgentSidebar(props: { width: number; ask?: string; onAskConsumed
         setRunning(true);
         setParked(false);
       }
-      if (e.kind === "done") setRunning(false);
+      if (e.kind === "done") {
+        setRunning(false);
+        // The AI that actually worked (another one may have taken over after a failure), and which
+        // ones are resting now.
+        const by = e.provider;
+        void loadProviders(true).then(() => by && setProvider(by));
+      }
       if (e.kind === "status" && /novedades sin ver/.test(e.text)) setParked(true);
       setEntries((list) => reduce(list, e));
     });

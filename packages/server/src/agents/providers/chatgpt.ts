@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { recordEvent } from "@penteos/core";
 import { type ChatGptAuth, ChatGptSignedOut } from "../chatgpt-auth.js";
+import { type FailureKind, ProviderFailure } from "../failover.js";
 import { msg } from "../messages.js";
 import type { ProviderSession, TurnContext } from "../types.js";
 import { agentOperations, displayToolName, LAST_STEP_NOTE, runTool, toolName, toolSchema } from "../tools.js";
@@ -33,6 +34,24 @@ function explain(code: string | undefined, lang: TurnContext["lang"], detail?: s
       return msg(L, "provider.chatgpt.unsupported", { detail: detail ?? "" });
     default:
       return msg(L, "provider.chatgpt.error", { detail: detail ?? code ?? "?" });
+  }
+}
+
+/** The plan's answers another AI could carry on from (the Maestro's failover, failover.ts). */
+function failureOf(code: string | undefined): FailureKind | undefined {
+  switch (code) {
+    case "subscription_sharing_usage_limit_exceeded":
+      return "quota";
+    case "subscription_sharing_user_not_eligible":
+    case "subscription_sharing_invalid_user":
+    case "chatpass_v2_scope_not_authorized":
+    case "chatpass_v2_invalid_authorization_context":
+      return "auth";
+    case "subscription_sharing_usage_unavailable":
+    case "subscription_sharing_user_unavailable":
+      return "down";
+    default:
+      return undefined;
   }
 }
 
@@ -75,8 +94,8 @@ export class ChatGptPlanSession implements ProviderSession {
       try {
         token = await this.auth.token();
       } catch (e) {
-        ctx.emit({ kind: "error", text: e instanceof ChatGptSignedOut ? msg(lang, "provider.chatgpt.signedOut") : msg(lang, "provider.chatgpt.unavailable") });
-        return;
+        if (e instanceof ChatGptSignedOut) throw new ProviderFailure("auth", msg(lang, "provider.chatgpt.signedOut"));
+        throw new ProviderFailure("down", msg(lang, "provider.chatgpt.unavailable"));
       }
       const client = new OpenAI({ apiKey: token, baseURL: this.auth.endpoints.api, maxRetries: 0 });
       const model = ctx.settings.model || (await this.defaultModel());
@@ -135,6 +154,10 @@ export class ChatGptPlanSession implements ProviderSession {
           continue;
         }
         const err = e as { status?: number; code?: string; error?: { code?: string; param?: string }; message?: string };
+        const kind = failureOf(err.code ?? err.error?.code);
+        if (kind) throw new ProviderFailure(kind, explain(err.code ?? err.error?.code, lang, err.error?.param ?? err.message));
+        // A status the SDK gave (429, 5xx, 401…): the failover classifies it.
+        if (err.status && (err.status >= 500 || err.status === 429 || err.status === 401 || err.status === 403 || err.status === 402)) throw e;
         ctx.emit({ kind: "error", text: explain(err.code ?? err.error?.code, lang, err.error?.param ?? err.message) });
         return;
       }
@@ -145,6 +168,7 @@ export class ChatGptPlanSession implements ProviderSession {
         step--;
         continue;
       }
+      if (failure && failureOf(failure.code)) throw new ProviderFailure(failureOf(failure.code)!, explain(failure.code, lang, failure.message));
       if (failure || !completed) {
         ctx.emit({ kind: "error", text: explain(failure?.code, lang, failure?.message ?? "the stream ended early") });
         return;
