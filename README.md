@@ -26,7 +26,7 @@
 <br>
 
 <p align="center">
-  <a href="https://youtu.be/uP8LDN0gtfc"><img src="https://img.youtube.com/vi/uP8LDN0gtfc/maxresdefault.jpg" alt="Watch the demo: a real Penteos run against OWASP Juice Shop" width="88%"></a>
+  <a href="https://youtu.be/uP8LDN0gtfc"><img src="assets/readme/demo-video.jpg" alt="Play the demo video: a real Penteos run against OWASP Juice Shop" width="88%"></a>
   <br>
   <b><a href="https://youtu.be/uP8LDN0gtfc">▶ Watch a real run</a></b>: 13 minutes of the Maestro against OWASP Juice Shop, 11 findings with evidence, client data masked, in 2 minutes. Unedited, only sped up.
 </p>
