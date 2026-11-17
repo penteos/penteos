@@ -50,6 +50,8 @@ export interface TurnContext {
   lang?: Language;
   /** Operations this agent may use (all agent operations when absent). */
   allow?: (operation: string) => boolean;
+  /** How many tokens the conversation may take before it is compacted (see memory.ts). */
+  memoryTokens?: number;
 }
 
 /** One conversation with one provider. Keeps the provider-specific history. */

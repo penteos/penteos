@@ -4,6 +4,7 @@ import { type ChatGptAuth, ChatGptSignedOut } from "../chatgpt-auth.js";
 import { msg } from "../messages.js";
 import type { ProviderSession, TurnContext } from "../types.js";
 import { agentOperations, displayToolName, LAST_STEP_NOTE, runTool, toolName, toolSchema } from "../tools.js";
+import { announce, isContextOverflow, keepWithinBudget, memoryBudget, type MemoryAdapter, responsesAdapter } from "../memory.js";
 
 const MAX_STEPS = 40;
 
@@ -42,6 +43,8 @@ function explain(code: string | undefined, lang: TurnContext["lang"], detail?: s
  */
 export class ChatGptPlanSession implements ProviderSession {
   private readonly items: Item[];
+  /** The model's window as learned from an overflow, when smaller than the budget. */
+  private window?: number;
 
   constructor(
     private readonly auth: ChatGptAuth,
@@ -63,6 +66,8 @@ export class ChatGptPlanSession implements ProviderSession {
     const lang = ctx.lang ?? "en";
     const tools = agentOperations(ctx.allow).map((op) => ({ type: "function" as const, name: toolName(op.name), description: op.description, parameters: toolSchema(op.name) as Record<string, unknown>, strict: false }));
     this.items.push({ role: "user", content: text });
+    const budget = () => Math.min(ctx.memoryTokens ?? memoryBudget(false), this.window ?? Infinity);
+    let overflowRetried = false;
 
     for (let step = 0; step < MAX_STEPS; step++) {
       if (ctx.signal.aborted) return;
@@ -75,6 +80,19 @@ export class ChatGptPlanSession implements ProviderSession {
       }
       const client = new OpenAI({ apiKey: token, baseURL: this.auth.endpoints.api, maxRetries: 0 });
       const model = ctx.settings.model || (await this.defaultModel());
+      // A long round stays within the model's memory (the plan streams, and stores nothing).
+      const summarize = async (system: string, transcript: string) => {
+        let out = "";
+        const s = await client.responses.create({ model, instructions: system, input: [{ role: "user", content: transcript }], store: false, stream: true }, { signal: ctx.signal });
+        for await (const ev of s) if (ev.type === "response.output_text.delta") out += ev.delta;
+        return out;
+      };
+      const remember = async (force = false) => {
+        const outcome = await keepWithinBudget(this.items, responsesAdapter as unknown as MemoryAdapter<Item>, budget(), summarize, { force, signal: ctx.signal });
+        if (force && outcome) this.window = outcome.budgetTokens;
+        announce(outcome, ctx);
+      };
+      await remember();
       let content = "";
       const calls: Array<{ call_id: string; name: string; arguments: string }> = [];
       let completed = false;
@@ -110,15 +128,28 @@ export class ChatGptPlanSession implements ProviderSession {
         }
       } catch (e) {
         if (ctx.signal.aborted) return;
+        if (!overflowRetried && isContextOverflow(e)) {
+          overflowRetried = true;
+          await remember(true);
+          step--;
+          continue;
+        }
         const err = e as { status?: number; code?: string; error?: { code?: string; param?: string }; message?: string };
         ctx.emit({ kind: "error", text: explain(err.code ?? err.error?.code, lang, err.error?.param ?? err.message) });
         return;
       }
       // Only response.completed is a success: a stream that stops, or fails half-way, is said.
+      if (failure && !overflowRetried && isContextOverflow(failure)) {
+        overflowRetried = true;
+        await remember(true);
+        step--;
+        continue;
+      }
       if (failure || !completed) {
         ctx.emit({ kind: "error", text: explain(failure?.code, lang, failure?.message ?? "the stream ended early") });
         return;
       }
+      overflowRetried = false;
       if (content) this.items.push({ role: "assistant", content });
       for (const c of calls) this.items.push({ type: "function_call", call_id: c.call_id, name: c.name, arguments: c.arguments || "{}" });
       if (calls.length === 0) {

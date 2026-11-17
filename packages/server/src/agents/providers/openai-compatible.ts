@@ -3,6 +3,7 @@ import type { ProviderSession, TurnContext } from "../types.js";
 import { msg } from "../messages.js";
 import { recordEvent } from "@penteos/core";
 import { agentOperations, displayToolName, LAST_STEP_NOTE, runTool, toolName, toolSchema } from "../tools.js";
+import { announce, chatAdapter, isContextOverflow, keepWithinBudget, memoryBudget, type MemoryAdapter } from "../memory.js";
 
 const MAX_STEPS = 40;
 /** A turn that comes back with nothing (no text, no tool call) is asked again this many times. */
@@ -44,6 +45,8 @@ export function sanitizeHistory(messages: Message[]): Message[] {
  */
 export class OpenAICompatibleSession implements ProviderSession {
   private readonly messages: OpenAI.Chat.ChatCompletionMessageParam[];
+  /** The model's window as learned from an overflow, when smaller than the budget. */
+  private window?: number;
 
   constructor(
     private readonly defaults: { baseUrl?: string; model: string; apiKeyRequired: boolean },
@@ -77,10 +80,38 @@ export class OpenAICompatibleSession implements ProviderSession {
     this.messages.splice(0, this.messages.length, ...sanitizeHistory(this.messages));
     this.messages.push({ role: "user", content: text });
 
+    // A long round stays within the model's memory: old results are cut, the older part summed up.
+    const budget = () => Math.min(ctx.memoryTokens ?? memoryBudget(!this.defaults.apiKeyRequired), this.window ?? Infinity);
+    const summarize = async (system: string, transcript: string) => {
+      const r = await client.chat.completions.create({ model, messages: [{ role: "system", content: system }, { role: "user", content: transcript }], max_tokens: 6000 }, { signal: ctx.signal });
+      return r.choices[0]?.message?.content ?? "";
+    };
+    const remember = async (force = false) => {
+      const outcome = await keepWithinBudget(this.messages, chatAdapter as unknown as MemoryAdapter<Message>, budget(), summarize, { force, signal: ctx.signal });
+      if (outcome) this.messages.splice(0, this.messages.length, ...sanitizeHistory(this.messages));
+      if (force && outcome) this.window = outcome.budgetTokens;
+      announce(outcome, ctx);
+    };
+
     let emptyRetries = 0;
+    let overflowRetried = false;
     for (let step = 0; step < MAX_STEPS; step++) {
       if (ctx.signal.aborted) return;
-      const stream = await client.chat.completions.create({ model, messages: this.messages, tools, ...(step === MAX_STEPS - 1 ? { tool_choice: "none" as const } : {}), stream: true }, { signal: ctx.signal });
+      await remember();
+      let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+      try {
+        stream = await client.chat.completions.create({ model, messages: this.messages, tools, ...(step === MAX_STEPS - 1 ? { tool_choice: "none" as const } : {}), stream: true }, { signal: ctx.signal });
+        overflowRetried = false;
+      } catch (error) {
+        // The model's window is smaller than the budget assumed: compact now and try once more.
+        if (!ctx.signal.aborted && !overflowRetried && isContextOverflow(error)) {
+          overflowRetried = true;
+          await remember(true);
+          step--;
+          continue;
+        }
+        throw error;
+      }
 
       let content = "";
       let reasoning = 0;

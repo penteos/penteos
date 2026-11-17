@@ -3,6 +3,7 @@ import type { ProviderSession, TurnContext } from "../types.js";
 import { msg } from "../messages.js";
 import { recordEvent } from "@penteos/core";
 import { agentOperations, displayToolName, LAST_STEP_NOTE, runTool, toolName, toolSchema } from "../tools.js";
+import { announce, anthropicAdapter, isContextOverflow, keepWithinBudget, memoryBudget, type MemoryAdapter } from "../memory.js";
 
 const DEFAULT_MODEL = "claude-opus-5-5";
 const MAX_STEPS = 40;
@@ -12,8 +13,14 @@ const MAX_STEPS = 40;
  * call goes through executeOperation with the agent's identity, scope checks and audit.
  */
 export class AnthropicSession implements ProviderSession {
-  /** Append-only history: earlier turns are never edited (preserved thinking). */
+  /**
+   * The history. Earlier turns are only changed when the round outgrows the model's memory (old
+   * results cut, the older part summed up: see memory.ts); the recent turns, thinking included,
+   * stay as they were.
+   */
   private readonly messages: Anthropic.Beta.BetaMessageParam[];
+  /** The model's window as learned from an overflow, when smaller than the budget. */
+  private window?: number;
 
   constructor(state?: unknown) {
     this.messages = Array.isArray((state as { messages?: unknown })?.messages) ? ((state as { messages: Anthropic.Beta.BetaMessageParam[] }).messages) : [];
@@ -44,12 +51,25 @@ export class AnthropicSession implements ProviderSession {
     }));
     this.messages.push({ role: "user", content: text });
     let jsonRetries = 0;
+    const model = ctx.settings.model || DEFAULT_MODEL;
+    const budget = () => Math.min(ctx.memoryTokens ?? memoryBudget(false), this.window ?? Infinity);
+    const summarize = async (system: string, transcript: string) => {
+      const r = await client.beta.messages.create({ model, max_tokens: 8000, system, messages: [{ role: "user", content: transcript }] }, { signal: ctx.signal });
+      return r.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+    };
+    const remember = async (force = false) => {
+      const outcome = await keepWithinBudget(this.messages, anthropicAdapter as unknown as MemoryAdapter<Anthropic.Beta.BetaMessageParam>, budget(), summarize, { force, signal: ctx.signal });
+      if (force && outcome) this.window = outcome.budgetTokens;
+      announce(outcome, ctx);
+    };
+    let overflowRetried = false;
 
     for (let step = 0; step < MAX_STEPS; step++) {
       if (ctx.signal.aborted) return;
+      await remember();
       const stream = client.beta.messages.stream(
         {
-          model: ctx.settings.model || DEFAULT_MODEL,
+          model,
           max_tokens: 64000,
           system: [{ type: "text", text: ctx.system, cache_control: { type: "ephemeral" } }],
           tools,
@@ -70,8 +90,16 @@ export class AnthropicSession implements ProviderSession {
       try {
         message = await stream.finalMessage();
         jsonRetries = 0;
+        overflowRetried = false;
       } catch (error) {
         if (ctx.signal.aborted) return;
+        // The model's window is smaller than the budget assumed: compact now and try once more.
+        if (!overflowRetried && isContextOverflow(error)) {
+          overflowRetried = true;
+          await remember(true);
+          step--;
+          continue;
+        }
         if (error instanceof Anthropic.APIError || jsonRetries++ >= 2) throw error;
         ctx.emit({ kind: "status", text: msg(ctx.lang ?? "en", "provider.status.badToolInput") });
         continue;
@@ -108,12 +136,14 @@ export class AnthropicSession implements ProviderSession {
       );
       const last = step === MAX_STEPS - 2;
       this.messages.push({ role: "user", content: last ? [...results, { type: "text" as const, text: LAST_STEP_NOTE }] : results });
-      if (last) ctx.emit({ kind: "status", text: msg(ctx.lang ?? "en", "provider.status.lastStep", { n: MAX_STEPS }) });
+      if (last) {
+        ctx.emit({ kind: "status", text: msg(ctx.lang ?? "en", "provider.status.lastStep", { n: MAX_STEPS }) });
         try {
           recordEvent(ctx.ops.engagement(), "stepLimit");
         } catch {
           /* no engagement */
         }
+      }
     }
     ctx.emit({ kind: "error", text: msg(ctx.lang ?? "en", "provider.error.maxSteps", { n: MAX_STEPS }) });
   }

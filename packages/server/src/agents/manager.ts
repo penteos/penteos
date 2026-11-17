@@ -13,6 +13,7 @@ import { SubAgent } from "./subagent.js";
 import { systemPrompt } from "./tools.js";
 import { Verifier, type VerifierProvider } from "./verifier.js";
 import { msg } from "./messages.js";
+import { memoryBudget } from "./memory.js";
 import { type AgentEvent, foldDelta, type ProviderId, type ProviderSession, type ProviderSettings, type SalaCard } from "./types.js";
 
 /** How many times the agent may continue on its own (news only) per operator message. */
@@ -1009,6 +1010,7 @@ export class AgentManager {
         emit,
         signal: controller.signal,
         lang: this.lang(engagementId),
+        memoryTokens: memoryBudget(local),
       });
     } catch (error) {
       if (!controller.signal.aborted) emit({ kind: "error", text: (error as Error).message });
