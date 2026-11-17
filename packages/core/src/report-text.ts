@@ -39,6 +39,10 @@ export interface ReportText {
   affected: string;
   evidence: string;
   evidenceMissing: string;
+  /** Before the quotes checked in the output: "Verified in the response". */
+  quotesChecked: string;
+  /** Before what a finding proved by absence is: "Proved by absence". */
+  absenceProof: string;
   remediation: string;
   references: string;
   surface: string;
@@ -111,6 +115,8 @@ const es: ReportText = {
   affected: "Activos afectados",
   evidence: "Evidencia",
   evidenceMissing: "_(contenido de evidencia no disponible)_",
+  quotesChecked: "Verificado en la respuesta",
+  absenceProof: "Probado por ausencia",
   remediation: "Recomendación",
   references: "Referencias",
   surface: "Superficie observada",
@@ -194,6 +200,8 @@ const en: ReportText = {
   affected: "Affected assets",
   evidence: "Evidence",
   evidenceMissing: "_(evidence content not available)_",
+  quotesChecked: "Checked in the response",
+  absenceProof: "Proved by absence",
   remediation: "Recommendation",
   references: "References",
   surface: "Observed surface",

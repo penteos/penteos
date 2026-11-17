@@ -75,6 +75,8 @@ const work: Record<string, string> = {
   "detail.statusFailed": "Could not change the status",
   "detail.missing": "Missing: {list}",
   "detail.missing.evidence": "evidence",
+  "detail.quotesChecked": "Checked in the response",
+  "detail.absenceProof": "Proved by absence:",
   "detail.missing.remediation": "remediation",
   "detail.missing.description": "description",
   "detail.toReview": "Send to review",

@@ -60,7 +60,10 @@ describe("coverage", () => {
   it("the matrix shows every application, and the analysis does not close with categories nobody looked at", async () => {
     eng.ingest({ format: "penteos.ingest/v0", source: { parser: "test@0.1", tool: "test" }, rawIds: [], observedAt: new Date().toISOString(), items: [{ op: "upsert", kind: "webapp", key: { origin: "https://app.lab" }, confidence: 1 }] } as never, HUMAN.actor);
     const app = eng.query({ kind: "webapp" })[0]!;
-    await executeOperation("webapp.set_coverage", { webappId: app.id, category: "ATHN", status: "tested" }, ctx(MAESTRO));
+    // Clean is said with what backs it: what was tried, and on what.
+    await expect(executeOperation("webapp.set_coverage", { webappId: app.id, category: "ATHN", status: "tested" }, ctx(MAESTRO))).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await expect(executeOperation("webapp.set_coverage", { webappId: app.id, category: "ATHN", status: "tested", note: "login con credenciales comunes y sin límite", basis: ["01NOPE"] }, ctx(MAESTRO))).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await executeOperation("webapp.set_coverage", { webappId: app.id, category: "ATHN", status: "tested", note: "login con credenciales comunes y sin límite", basis: [app.id] }, ctx(MAESTRO));
     const m = (await executeOperation("coverage.matrix", {}, ctx(HUMAN))) as { apps: Array<{ origin: string; coverage: Array<{ id: string; status: string }> }> };
     expect(m.apps).toHaveLength(1);
     expect(m.apps[0]!.coverage.find((c) => c.id === "ATHN")!.status).toBe("tested");

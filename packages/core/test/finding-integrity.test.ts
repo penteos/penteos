@@ -41,7 +41,7 @@ async function finding(): Promise<{ id: string; endpoint: string }> {
     { op: "upsert", kind: "webapp", key: { origin: "https://app.lab" }, confidence: 1 },
   ] } as never, human);
   const app = eng.query({ kind: "webapp" })[0]!;
-  const f = (await executeOperation("finding.create", { title: "Sin límite de intentos", severity: "medium", instances: [{ entityId: app.id, location: "/login" }] }, ctx())) as { id: string };
+  const f = (await executeOperation("finding.create", { title: "Sin límite de intentos", severity: "medium", instances: [{ entityId: app.id, location: "/login" }], absenceProof: "30 intentos seguidos en POST /login: ninguno bloqueado ni demorado" }, ctx())) as { id: string };
   return { id: f.id, endpoint: app.id };
 }
 

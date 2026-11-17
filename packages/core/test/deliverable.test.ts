@@ -50,7 +50,8 @@ describe("report by project type", () => {
     const web = ws.create({ language: "es", clientName: "ACME", name: "Web", mode: "web" }, human);
     web.addScopeRule({ effect: "include", target: { type: "domain", value: "shop.acme.test" } }, human);
     const app = web.createEntity("webapp", { origin: "https://shop.acme.test" }, human);
-    await executeOperation("webapp.set_coverage", { webappId: app.id, category: "ATHN", status: "vulnerable", note: "credenciales por defecto" }, ctx(agent, web));
+    const fd = (await executeOperation("finding.create", { title: "Credenciales por defecto", severity: "high", absenceProof: "admin/admin aceptado" }, ctx(agent, web))) as { id: string };
+    await executeOperation("webapp.set_coverage", { webappId: app.id, category: "ATHN", status: "vulnerable", note: "credenciales por defecto", basis: [fd.id] }, ctx(agent, web));
     const md1 = ((await executeOperation("report.render", {}, ctx(human, web))) as { markdown: string }).markdown;
     expect(md1).toContain("# Informe de pentest - Web");
     expect(md1).toContain("Cobertura de pruebas (OWASP WSTG)");

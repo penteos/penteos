@@ -187,8 +187,9 @@ describe("capabilities: the agent is never stuck for lack of a tool", () => {
     await run("http_probe", [`http://127.0.0.1:${webPort}`]);
     await run("vuln_templates", [`http://127.0.0.1:${webPort}`]);
     const app = eng.query({ kind: "webapp" })[0]!;
-    await executeOperation("webapp.set_coverage", { webappId: app.id, category: "CONF", status: "tested" }, ctx(agent));
-    await executeOperation("webapp.set_coverage", { webappId: app.id, category: "ATHN", status: "tested" }, ctx(agent));
+    const basis = eng.runs(10).map((r) => r.id);
+    await executeOperation("webapp.set_coverage", { webappId: app.id, category: "CONF", status: "tested", note: "plantillas de configuración sobre la app", basis }, ctx(agent));
+    await executeOperation("webapp.set_coverage", { webappId: app.id, category: "ATHN", status: "tested", note: "login probado con credenciales comunes", basis }, ctx(agent));
     const cov = eng.get(app.id)!.attributes.coverage as Record<string, { status: string; note?: string }>;
     expect(cov.CONF).toMatchObject({ status: "partial", note: expect.stringMatching(/Parcial: .*plantillas de vulnerabilidades/) });
     // A category no gap touches stays as the agent said.

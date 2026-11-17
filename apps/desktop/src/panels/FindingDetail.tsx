@@ -40,6 +40,15 @@ function EvidenceItem(props: { id: string; findingId?: string; removable?: boole
           </button>
         ) : null}
       </div>
+      {/* Exact text of the output that proves it, checked against it when the evidence was made. */}
+      {((ev.attributes.quotes as string[] | undefined) ?? []).length ? (
+        <div className="evidence-quotes">
+          <span className="evidence-quotes-label">{t("work.detail.quotesChecked")}</span>
+          {(ev.attributes.quotes as string[]).map((q, i) => (
+            <code key={i} className="evidence-quote">{q}</code>
+          ))}
+        </div>
+      ) : null}
       <pre className="mono">{ev.excerpt || t("work.detail.evidenceEmpty")}</pre>
     </div>
   );
@@ -199,6 +208,11 @@ export function FindingDetailPanel(props: { params: { id: string } }) {
 
         <div className="section-title">{t("work.detail.evidence")}</div>
         <div style={{ padding: "0 20px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+          {a.absenceProof ? (
+            <div className="evidence-absence">
+              <b>{t("work.detail.absenceProof")}</b> {String(a.absenceProof)}
+            </div>
+          ) : null}
           {((a.evidenceIds as string[]) ?? []).length === 0 ? (
             <span className="muted">{t("work.detail.noEvidence")}</span>
           ) : (

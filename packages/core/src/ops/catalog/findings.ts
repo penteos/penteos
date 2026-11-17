@@ -4,6 +4,14 @@ import { z } from "zod";
 import type { ReplaceRule } from "../../proxy/intercept.js";
 import { engagementId, untrusted } from "./shared.js";
 import { openDeepening } from "../../impact.js";
+import { checkQuotes, MIN_QUOTE, NEEDS_PROOF, proofOf } from "../../proof.js";
+
+/** For a finding proved by something missing: the textual proof is then what was looked at. */
+const ABSENCE_PROOF = z
+  .string()
+  .max(1000)
+  .optional()
+  .describe("Only when what proves the finding is something MISSING (a security header, an account lockout, a rate limit, a CSRF token): what is missing and where you looked, e.g. \"no Strict-Transport-Security in the responses of /, /login, /api/me (runs 01H…)\". Findings proved by something present need quoted evidence instead.");
 
 // ---------------------------------------------------------------------------------------------
 // findings / evidence
@@ -12,7 +20,8 @@ import { openDeepening } from "../../impact.js";
 defineOperation({
   name: "evidence.from_raw",
   title: "Evidence from output",
-  description: "Creates evidence from a fragment of a raw artifact (byte range).",
+  description:
+    "Creates evidence from a fragment of a raw artifact (byte range). Add quotes: the exact text of that output that proves the point (the leaked hash, another user's e-mail, the SQL error, the admin page title), copied verbatim as you read it, markers included («email:3»). Penteos checks every quote is really in the output and refuses the evidence otherwise; a medium, high or critical finding goes to the operator only with at least one checked quote (or, when what proves it is something missing, with absenceProof on the finding).",
   kind: "write",
   actors: ["human", "agent"],
   input: z.object({
@@ -20,17 +29,34 @@ defineOperation({
     rawId: z.string(),
     caption: z.string().min(1),
     range: z.object({ start: z.number().int().min(0), end: z.number().int().min(0) }).optional(),
+    quotes: z
+      .array(z.string().min(MIN_QUOTE).max(800))
+      .max(6)
+      .optional()
+      .describe(`Exact text from this output that proves the finding, at least ${MIN_QUOTE} characters each, as you read it (whitespace may differ). Checked against the stored output.`),
   }),
   handler: (input, ctx) => {
     const e = ctx.engagement(input.engagementId);
     // Evidence pointing to an output that does not exist proves nothing: refuse it up front.
     if (!e.hasRaw(input.rawId)) throw new OperationError("NOT_FOUND", `raw artifact not found: ${input.rawId}. Use the rawId a run, http_send or raw_get returned (sha256:…).`);
+    // A quote that is not in the output is not proof: the evidence is refused, with the ones that failed.
+    const quotes = (input.quotes ?? []).map((q) => q.trim()).filter(Boolean);
+    if (quotes.length) {
+      const { missing } = checkQuotes(e, input.rawId, input.range, quotes);
+      if (missing.length) {
+        throw new OperationError(
+          "VALIDATION_ERROR",
+          `${missing.length === 1 ? "this quote is" : "these quotes are"} not in ${input.rawId}${input.range ? ` (bytes ${input.range.start}-${input.range.end})` : ""}: ${missing.map((q) => `«${q.length > 120 ? `${q.slice(0, 120)}…` : q}»`).join(", ")}. Copy the text exactly as the output shows it (raw_get), or quote something else that is there.`,
+        );
+      }
+    }
     return e.createEntity(
       "evidence",
       {
         caption: input.caption,
         source: { type: "raw_excerpt", rawId: input.rawId, ...(input.range ? { range: input.range } : {}) },
         capturedAt: new Date().toISOString(),
+        ...(quotes.length ? { quotes, quotesCheckedAt: new Date().toISOString() } : {}),
       },
       ctx.caller.actor,
     );
@@ -54,6 +80,7 @@ defineOperation({
     evidenceIds: z.array(z.string()).default([]),
     cwe: z.array(z.string().regex(/^CWE-\d+$/)).optional(),
     references: z.array(z.string()).optional(),
+    absenceProof: ABSENCE_PROOF,
   }),
   handler: (input, ctx) => {
     const e = ctx.engagement(input.engagementId);
@@ -74,6 +101,7 @@ defineOperation({
         evidenceIds: input.evidenceIds,
         ...(input.cwe ? { cwe: input.cwe } : {}),
         ...(input.references ? { references: input.references } : {}),
+        ...(input.absenceProof?.trim() ? { absenceProof: input.absenceProof.trim() } : {}),
         owner: ctx.caller.actor,
       },
       ctx.caller.actor,
@@ -84,6 +112,7 @@ defineOperation({
 });
 
 export const FindingText = {
+  absenceProof: ABSENCE_PROOF,
   description: z.string().optional(),
   impact: z.string().optional(),
   remediation: z.string().optional(),
@@ -231,6 +260,23 @@ defineOperation({
   actors: ["human", "agent"],
   input: z.object({ engagementId, ids: z.array(z.string()).min(1).max(50), reason: z.string().min(1) }),
   handler: (input, ctx) => {
+    // What goes before the operator is proven by what the target answered: a medium, high or
+    // critical finding from an agent needs a quote checked in the output (proof.ts), or an absence.
+    if (ctx.caller.actor.type === "agent") {
+      const e = ctx.engagement(input.engagementId);
+      const unproven = input.ids.flatMap((id) => {
+        const f = e.get(id);
+        if (!f || f.kind !== "finding" || !NEEDS_PROOF.has(String(f.attributes.severity))) return [];
+        const p = proofOf(e, f);
+        return p.quoted || p.absence ? [] : [`${id} «${String(f.attributes.title)}»`];
+      });
+      if (unproven.length) {
+        throw new OperationError(
+          "VALIDATION_ERROR",
+          `no textual proof yet for: ${unproven.join("; ")}. For each one, create evidence with quotes (evidence_from_raw with quotes: the exact text of the response that proves it) and attach it (finding_update addEvidenceIds); if what proves it is something missing (a header, a lockout, a limit), set absenceProof with what is missing and where you looked. Then ask again.`,
+        );
+      }
+    }
     try {
       const a = ctx.runner(input.engagementId).proposeFindings(input.ids, input.reason, ctx.caller.actor);
       return { status: "pending_approval", approvalId: a.id, findings: input.ids.length };
@@ -310,6 +356,11 @@ defineOperation({
       throw new OperationError("PERMISSION_DENIED", "only the verifier assigned to this finding can record its verdict");
     }
     for (const id of input.evidenceIds) if (e.get(id)?.kind !== "evidence") throw new OperationError("NOT_FOUND", `evidence not found: ${id}`);
+    // A reproduction is said with what the target answered this time: quoted, like the finding.
+    if (ctx.caller.actor.type === "agent" && input.verdict === "reproduced" && NEEDS_PROOF.has(String(finding.attributes.severity)) && !String(finding.attributes.absenceProof ?? "").trim()) {
+      const quoted = input.evidenceIds.some((id) => ((e.get(id)?.attributes.quotes as unknown[] | undefined) ?? []).length > 0);
+      if (!quoted) throw new OperationError("VALIDATION_ERROR", "a reproduction is recorded with quoted evidence of your own: create it with evidence_from_raw and quotes (the exact text of the response that shows it again), then record the verdict with it");
+    }
     const verification = {
       state: "done",
       verdict: input.verdict,

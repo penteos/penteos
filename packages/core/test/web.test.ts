@@ -94,7 +94,8 @@ describe("web imports and coverage", () => {
     expect(login.attributes.params).toEqual([{ name: "user", location: "body" }, { name: "pass", location: "body" }]);
 
     const app = eng.query({ kind: "webapp" })[0]!;
-    await executeOperation("webapp.set_coverage", { webappId: app.id, category: "ATHN", status: "vulnerable", note: "credenciales por defecto" }, ctx(agent));
+    const fd = (await executeOperation("finding.create", { title: "Credenciales por defecto", severity: "high", absenceProof: "admin/admin aceptado" }, ctx(agent))) as { id: string };
+    await executeOperation("webapp.set_coverage", { webappId: app.id, category: "ATHN", status: "vulnerable", note: "credenciales por defecto", basis: [fd.id] }, ctx(agent));
     const cov = (await executeOperation("webapp.coverage", { webappId: app.id }, ctx(human))) as Array<{ id: string; status: string }>;
     expect(cov.find((c) => c.id === "ATHN")!.status).toBe("vulnerable");
     expect(cov.find((c) => c.id === "INPV")!.status).toBe("untested");

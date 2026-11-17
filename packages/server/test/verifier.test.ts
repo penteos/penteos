@@ -100,7 +100,7 @@ describe("independent verifier", () => {
       forbidden = (await call("finding_update", { id: "x", title: "y" })).content;
       const sent = JSON.parse((await call("http_send", { origin, raw: "GET /admin HTTP/1.1\n\n", risk: "active" })).content) as { rawId: string; response: { status: number } };
       expect(sent.response.status).toBe(200);
-      const ev = JSON.parse((await call("evidence_from_raw", { rawId: sent.rawId, caption: "GET /admin sin cookie → 200" })).content) as { id: string };
+      const ev = JSON.parse((await call("evidence_from_raw", { rawId: sent.rawId, caption: "GET /admin sin cookie → 200", quotes: ["<h1>Panel de administración</h1>"] })).content) as { id: string };
       const id = (eng.query({ kind: "finding" })[0]!).id;
       const r = await call("finding_verdict", { id, verdict: "reproduced", summary: "Sin cookie, /admin devuelve 200 con el panel.", evidenceIds: [ev.id] });
       expect(r.ok).toBe(true);

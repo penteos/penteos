@@ -296,7 +296,7 @@ defineOperation({
   name: "webapp.set_coverage",
   title: "Record OWASP coverage",
   description:
-    "Records the state of an OWASP WSTG category (or several at once with categories) on a web application: in_progress, tested (nothing found), partial (tested, but not all of it could be done: say why in the note, e.g. 'no test account'), vulnerable (link the finding in the note) or n/a (with the reason). Update it as you test, so the operator and the report show what was covered. If a tool gap affects that category on that app, 'tested' is recorded as 'partial' with the reason: the coverage never claims what a missing tool kept from being done.",
+    "Records the state of an OWASP WSTG category (or several at once with categories) on a web application: in_progress, tested (nothing found: say in the note what you tried, and give in basis the ids it rests on - runs, outputs sha256:…, evidence), partial (tested, but not all of it could be done: say why in the note, e.g. 'no test account'), vulnerable (give the finding's id in basis) or n/a (with the reason). Update it as you test, so the operator and the report show what was covered. If a tool gap affects that category on that app, 'tested' is recorded as 'partial' with the reason: the coverage never claims what a missing tool kept from being done.",
   kind: "write",
   actors: ["human", "agent"],
   input: z.object({
@@ -306,6 +306,7 @@ defineOperation({
     categories: z.array(z.enum(WSTG.map((c) => c.id) as [string, ...string[]])).max(20).optional(),
     status: z.enum(["untested", "in_progress", "tested", "partial", "vulnerable", "n/a"]),
     note: z.string().optional(),
+    basis: z.array(z.string()).max(30).optional().describe("What the status rests on: ids of runs, outputs (sha256:…), evidence, observations or findings. Required from agents for tested (what was run) and vulnerable (the finding)."),
   }),
   handler: (input, ctx) => {
     const e = ctx.engagement(input.engagementId);
@@ -315,6 +316,16 @@ defineOperation({
     if (!categories.length) throw new OperationError("VALIDATION_ERROR", "pass category or categories");
     // Not tested, partly or not at all, is said with why: the report and the client read it.
     if (ctx.caller.actor.type === "agent" && (input.status === "partial" || input.status === "n/a") && !input.note?.trim()) throw new OperationError("VALIDATION_ERROR", `${input.status} needs a note saying why (e.g. "no test account", "no login on this app")`);
+    // Clean or vulnerable is said with what backs it: a category is clean because it was tested,
+    // not because nothing turned up.
+    const basis = [...new Set((input.basis ?? []).map((b) => b.trim()).filter(Boolean))];
+    const unknownBasis = basis.filter((id) => !(e.getRun(id) || e.hasRaw(id) || e.get(id)));
+    if (unknownBasis.length) throw new OperationError("NOT_FOUND", `basis not found in this project: ${unknownBasis.join(", ")} (give ids of runs, outputs sha256:…, evidence, observations or findings)`);
+    if (ctx.caller.actor.type === "agent" && input.status === "tested") {
+      if ((input.note?.trim().length ?? 0) < 20) throw new OperationError("VALIDATION_ERROR", 'tested (nothing found) needs a note saying what you tried, e.g. "error-based and boolean SQLi on every parameter of /search and /api/products; no difference"');
+      if (!basis.length) throw new OperationError("VALIDATION_ERROR", "tested (nothing found) needs basis: the ids of the runs, outputs or evidence it rests on");
+    }
+    if (ctx.caller.actor.type === "agent" && input.status === "vulnerable" && !basis.some((id) => e.get(id)?.kind === "finding")) throw new OperationError("VALIDATION_ERROR", "vulnerable needs the finding's id in basis");
     const lang = e.info.language ?? "en";
     const coverage: Record<string, unknown> = { ...((app.attributes.coverage ?? {}) as Record<string, unknown>) };
     for (const category of categories) {
@@ -323,7 +334,7 @@ defineOperation({
       const status = limiting.length ? "partial" : input.status;
       const why = limiting.map((g) => gapLine(g, lang)).join(" · ");
       const note = [input.note, why && (lang === "en" ? `Partial: ${why}` : `Parcial: ${why}`)].filter(Boolean).join("\n");
-      coverage[category] = { status, ...(note ? { note } : {}), by: ctx.caller.name ?? ctx.caller.actor.type, at: new Date().toISOString() };
+      coverage[category] = { status, ...(note ? { note } : {}), ...(basis.length ? { basis } : {}), by: ctx.caller.name ?? ctx.caller.actor.type, at: new Date().toISOString() };
     }
     return e.editEntity(app.id, { coverage }, ctx.caller.actor);
   },

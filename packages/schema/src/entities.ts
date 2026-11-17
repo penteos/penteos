@@ -214,7 +214,17 @@ export const WebAppAttributes = z.object({
   waf: z.string().optional(),
   /** OWASP WSTG categories: what was tested on this application and how it went. */
   coverage: z
-    .record(z.string(), z.object({ status: z.enum(["untested", "in_progress", "tested", "partial", "vulnerable", "n/a"]), note: z.string().optional(), by: z.string().optional(), at: z.string().optional() }))
+    .record(
+      z.string(),
+      z.object({
+        status: z.enum(["untested", "in_progress", "tested", "partial", "vulnerable", "n/a"]),
+        note: z.string().optional(),
+        /** What the status rests on: runs, outputs, evidence, observations or findings. */
+        basis: z.array(z.string()).optional(),
+        by: z.string().optional(),
+        at: z.string().optional(),
+      }),
+    )
     .optional(),
   auth: z
     .object({ type: z.enum(["none", "form", "basic", "oauth", "saml", "other"]), notes: z.string().optional() })
@@ -406,6 +416,8 @@ export const FindingAttributes = z.object({
   fingerprint: z.string().optional(),
   verification: FindingVerification.optional(),
   deepening: FindingDeepening.optional(),
+  /** For a finding proved by something missing (a header, a lockout, a limit): what, and where it was looked for. */
+  absenceProof: z.string().max(1000).optional(),
 });
 
 export const EvidenceAttributes = z.object({
@@ -426,6 +438,9 @@ export const EvidenceAttributes = z.object({
     z.object({ type: z.literal("file"), rawId: Sha256Ref }),
   ]),
   redactions: z.array(z.object({ start: z.number().int(), end: z.number().int(), label: z.string().optional() })).optional(),
+  /** Exact text of the output that proves the point, each checked against it when the evidence was made. */
+  quotes: z.array(z.string()).optional(),
+  quotesCheckedAt: IsoDate.optional(),
   capturedAt: IsoDate,
 });
 

@@ -8,6 +8,7 @@ import { getPlan } from "./plan.js";
 import { getBaseline } from "./baseline.js";
 import { type EntityAttributes, REPORT_SECTION_IDS } from "@penteos/schema";
 import type { Engagement, Entity } from "./engagement.js";
+import { restore } from "./privacy/vault.js";
 
 type FindingAttrs = EntityAttributes<"finding">;
 const attrs = (f: Entity) => f.attributes as FindingAttrs;
@@ -454,11 +455,16 @@ export function renderReport(engagement: Engagement, options: ReportOptions = {}
       }
       if (String(a.reproduction ?? "").trim() && kind === "technical") out.push(`**${F.reproduction}**`, "", String(a.reproduction).trim(), "");
       const evidence = ((a.evidenceIds as string[] | undefined) ?? []).map((id) => engagement.get(id)).filter((e): e is Entity => Boolean(e));
+      if (String(a.absenceProof ?? "").trim()) out.push(`**${T.absenceProof}:** ${engagement.redact(restore(engagement, String(a.absenceProof)).text.trim())}`, "");
       if (evidence.length) {
         out.push(`**${T.evidence}**`, "");
         for (const ev of evidence) {
           const src = ev.attributes.source as { type?: string; rawId: string; range?: { start: number; end: number } };
           out.push(`*${ev.attributes.caption}*`, "");
+          // The exact text that proves it, checked against the output when the evidence was made (real
+          // values for the readers; secrets stay out).
+          const quotes = (ev.attributes.quotes as string[] | undefined) ?? [];
+          if (quotes.length) out.push(`_${T.quotesChecked}:_ ${quotes.map((q) => `\`${engagement.redact(restore(engagement, q).text).replace(/`/g, "'")}\``).join(" · ")}`, "");
           try {
             const mime = engagement.rawMime(src.rawId) ?? "";
             // A screenshot goes in as an image (the PDF and Word show it; markdown keeps its reference).
