@@ -35,5 +35,6 @@ import "./catalog/agent-browser.js";
 import "./catalog/oob.js";
 import "./catalog/metrics.js";
 import "./catalog/privacy.js";
+import "./catalog/pacing.js";
 import "./catalog/impact.js";
 import "./catalog/vuln.js";

@@ -93,6 +93,8 @@ const engagementId = eng.id;
 const on = (x = {}) => ({ engagementId, ...x });
 await api("engagement.update", on({ maxRisk: "exploitation", autonomy: "maestro_auto" }));
 await api("tool.set_auto_install", on({ enabled: true, maxMB: 3000 }));
+// A lab: no pace (a client's production site would keep the default, normal).
+await api("pacing.set", on({ pace: "off" }));
 // The workbench opens the operator's active project: make it this one (the core started on the
 // lab project it creates on a first run). The same connection later asks whether the Maestro is
 // still working (the core knows; the screen only suggests it).

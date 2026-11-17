@@ -1,3 +1,4 @@
+import { DEFAULT_PACE, type Pace, PACES, withPace } from "../pacing.js";
 import type { Actor, RiskLevel } from "@penteos/schema";
 import { z } from "zod";
 import type { Engagement } from "../engagement.js";
@@ -208,20 +209,28 @@ export async function executeOperation(name: string, rawInput: unknown, ctx: Ope
 
   // People read the real values behind the vault's markers (what the agents wrote stays masked
   // in storage; only the model never sees the real values).
+  // Everything the operation sends to a target (and the runs it starts) goes at the project's pace.
+  const pace = paceOf(engagementFor(ctx, rawInput));
   if (actorType !== "agent") {
-    const result = await perform(name, op, rawInput, ctx, actorType, {});
+    const result = await withPace(pace, () => perform(name, op, rawInput, ctx, actorType, {}));
     return withRealValues(ctx, rawInput, result);
   }
   // Agents' calls are counted per engagement (how the run went: errors, loops, repairs).
   const flags: CallFlags = {};
   try {
-    const result = await perform(name, op, rawInput, ctx, actorType, flags);
+    const result = await withPace(pace, () => perform(name, op, rawInput, ctx, actorType, flags));
     count(ctx, name, flags);
     return result;
   } catch (error) {
     count(ctx, name, { ...flags, error: error instanceof OperationError ? error.code : "INTERNAL" });
     throw error;
   }
+}
+
+/** How fast a project talks to its targets (pacing.ts); the default without one. */
+export function paceOf(e: { getMeta<T>(key: string): T | undefined } | undefined): Pace {
+  const p = e?.getMeta<Pace>("pacing.pace");
+  return p && PACES.includes(p) ? p : DEFAULT_PACE;
 }
 
 /** Writes whose value must be the real one (a credential saved from a response). */

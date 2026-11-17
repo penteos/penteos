@@ -1,6 +1,7 @@
 export * from "./scope/evaluate.js";
 export * from "./scope/target.js";
 export * from "./merge.js";
+export * from "./pacing.js";
 export * from "./engagement.js";
 export * from "./workspace.js";
 export * from "./tools/nmap.js";

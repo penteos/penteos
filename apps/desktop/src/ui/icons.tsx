@@ -190,6 +190,7 @@ export function Mark(props: { size?: number; className?: string; title?: string 
   return <img src={badgeUrl} width={s} height={s} className={props.className} alt={props.title ?? ""} aria-hidden={props.title ? undefined : true} draggable={false} style={{ display: "block", borderRadius: Math.round(s * 0.22) }} />;
 }
 export const Puzzle = angular(L.Puzzle);
+export const Gauge = angular(L.Gauge);
 export const Image = angular(L.Image);
 export const BarChart3 = angular(L.ChartColumn);
 export const Mail = angular(L.Mail);

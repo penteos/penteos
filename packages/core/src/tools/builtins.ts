@@ -3,6 +3,7 @@ import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP, Socket } from "node:net";
 import { lookup } from "node:dns/promises";
+import { acquire, currentPace, observe } from "../pacing.js";
 
 /**
  * Penteos's own fallbacks for the capabilities: what the agent gets
@@ -81,8 +82,28 @@ interface Fetched {
   ip?: string;
 }
 
-/** One GET, no redirects followed (a redirect could leave the scope), any certificate accepted. */
-export function httpGet(url: string, { timeoutMs = 10_000, maxBytes = 256 * 1024, signal }: { timeoutMs?: number; maxBytes?: number; signal?: AbortSignal } = {}): Promise<Fetched> {
+/**
+ * One GET, no redirects followed (a redirect could leave the scope), any certificate accepted, at
+ * the project's pace (pacing.ts): sent again once after the pause a 429 or 503 asked for.
+ */
+export async function httpGet(url: string, options: { timeoutMs?: number; maxBytes?: number; signal?: AbortSignal } = {}): Promise<Fetched> {
+  const host = new URL(url).hostname;
+  const pace = currentPace();
+  for (let attempt = 0; ; attempt++) {
+    const release = await acquire(host, pace);
+    let f: Fetched;
+    try {
+      f = await httpGetOnce(url, options);
+    } finally {
+      release();
+    }
+    const retryAfter = f.headers["retry-after"];
+    if (observe(host, f.status, Array.isArray(retryAfter) ? retryAfter[0] : retryAfter, pace) && attempt === 0 && !options.signal?.aborted) continue;
+    return f;
+  }
+}
+
+function httpGetOnce(url: string, { timeoutMs = 10_000, maxBytes = 256 * 1024, signal }: { timeoutMs?: number; maxBytes?: number; signal?: AbortSignal } = {}): Promise<Fetched> {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const req = (u.protocol === "https:" ? httpsRequest : httpRequest)(

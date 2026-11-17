@@ -1,3 +1,4 @@
+import { acquire, currentPace, isPlainRead, observe } from "./pacing.js";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { connect as http2Connect } from "node:http2";
@@ -126,7 +127,30 @@ export function sendH2(socket: TLSSocket | Socket, url: URL, method: string, hea
 
 const MAX_BODY = 5 * 1024 * 1024;
 
-export function sendHttp(url: URL, req: RawRequest, timeoutMs = 30_000): Promise<HttpResponse> {
+/**
+ * Sends one request to a target at the project's pace (pacing.ts): it waits for the host's turn,
+ * and a plain read the target answered with 429 or 503 is sent again once, after the pause it
+ * asked for.
+ */
+export async function sendHttp(url: URL, req: RawRequest, timeoutMs = 30_000): Promise<HttpResponse> {
+  const pace = currentPace();
+  const bodyLength = Buffer.byteLength(req.body ?? "", "utf8");
+  for (let attempt = 0; ; attempt++) {
+    const release = await acquire(url.hostname, pace);
+    let res: HttpResponse;
+    try {
+      res = await sendHttpOnce(url, req, timeoutMs);
+    } finally {
+      release();
+    }
+    const retryAfter = res.headers.find(([k]) => k.toLowerCase() === "retry-after")?.[1];
+    if (observe(url.hostname, res.status, retryAfter, pace) && attempt === 0 && isPlainRead(req.method, bodyLength)) continue;
+    return res;
+  }
+}
+
+/** One request, as it is, with no pace (sendHttp is what the rest of Penteos uses). */
+export function sendHttpOnce(url: URL, req: RawRequest, timeoutMs = 30_000): Promise<HttpResponse> {
   const started = Date.now();
   if (req.version === "2") return sendHttp2(url, req, timeoutMs, started);
   const send = url.protocol === "https:" ? httpsRequest : httpRequest;

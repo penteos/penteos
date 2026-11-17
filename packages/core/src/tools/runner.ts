@@ -11,6 +11,7 @@ import type { ActorPolicy, AskWhy, ScopeDecision } from "../scope/evaluate.js";
 import { analyzeNmapArgs, NMAP_PRESETS } from "./nmap.js";
 import { exploitationAllowed, setPhase } from "../plan.js";
 import { formatRequest, formatResponse, type HttpResponse, paramsOf, parseRawRequest, requestUrl, sendHttp } from "../http.js";
+import { DEFAULT_PACE, hostOfTarget, isLocalHost, type Pace, PACES, paceArguments, withPace } from "../pacing.js";
 import { harvestScript, type JsHarvest, mergeHarvests, scriptUrls } from "../webjs.js";
 import { allowlistBypasses, fillTemplate, guardedRoutes, redirectExamples, looksSentAway, REDIRECT_CANARY, REDIRECT_PAYLOADS, redirectsToCanary, SESSION_COOKIES, traversalReached, TRAVERSAL_PAYLOADS } from "../webprobes.js";
 import { type DnsIssue, lookupMail, lookupName, mailIssues, TAKEOVER_SERVICES, takeoverIssue } from "../dnscheck.js";
@@ -1394,8 +1395,9 @@ export class ToolRunner {
       } else if (input.check === "race") {
         const count = Math.min(Math.max(input.count, 2), 10);
         tried = count;
-        // All at once: each on its own connection, released together.
-        const results = await Promise.all(Array.from({ length: count }, () => send(input.raw).catch((e: Error) => ({ r: { status: 0, body: e.message, headers: [] as Array<[string, string]> }, exchange: e.message }))));
+        // All at once: each on its own connection, released together. The pace would spread them
+        // out and the test would mean nothing: at most 10 requests, approved as their risk.
+        const results = await withPace("off", () => Promise.all(Array.from({ length: count }, () => send(input.raw).catch((e: Error) => ({ r: { status: 0, body: e.message, headers: [] as Array<[string, string]> }, exchange: e.message })))));
         const statuses = results.map((x) => x.r.status);
         const ok = statuses.filter((s) => s >= 200 && s < 300).length;
         log.push(`statuses: ${statuses.join(", ")}`, ...results.map((x, i) => `#${i + 1} ${x.r.status} ${x.r.body.slice(0, 160).replace(/\s+/g, " ")}`));
@@ -3472,6 +3474,12 @@ export class ToolRunner {
     return true;
   }
 
+  /** How fast this project talks to its targets (pacing.ts). */
+  pace(): Pace {
+    const p = this.engagement.getMeta<Pace>("pacing.pace");
+    return p && PACES.includes(p) ? p : DEFAULT_PACE;
+  }
+
   /** Stops every running process (stop-work). */
   cancelAll(signal: NodeJS.Signals = "SIGINT"): number {
     for (const child of this.processes.values()) killTree(child, signal);
@@ -3486,9 +3494,14 @@ export class ToolRunner {
     // Its own process group, so cancelling also stops what the tool launched (scripts, helpers):
     // otherwise a child keeps the output open and the run never ends. Tied to the core: if the
     // core dies, the tool stops too instead of going on against the target (tied.ts).
-    const child = spawnTied(command, this.engagement.resolveSecrets(args).argv, { cwd: this.workDir(), env: cleanEnv(this.registry.toolbox?.binDir, this.registry.toolbox?.env()) });
+    // The project's pace, as the tool's own rate options (unless the command sets them). Shown at the
+    // top of the live output (not in the stored one: the parsers read that). Runs against this
+    // machine go at full speed.
+    const local = run.targets.length > 0 && run.targets.every((t) => isLocalHost(hostOfTarget(t)));
+    const paced = local ? { argv: args } : paceArguments(command, args, this.pace());
+    const child = spawnTied(command, this.engagement.resolveSecrets(paced.argv).argv, { cwd: this.workDir(), env: cleanEnv(this.registry.toolbox?.binDir, this.registry.toolbox?.env()) });
     this.processes.set(run.id, child);
-    this.live.set(run.id, "");
+    this.live.set(run.id, paced.added ? `[penteos] pace «${this.pace()}»: added ${paced.added}\n` : "");
     const onData = (data: Buffer) => {
       chunks.push(data);
       const chunk = data.toString("utf8");

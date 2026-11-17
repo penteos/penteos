@@ -4,6 +4,7 @@ import { useState } from "react";
 import { type ScopeRule, useApp } from "../state";
 import { Badge, toast } from "../ui/bits";
 import { RulesSection } from "../ui/Rules";
+import { PaceSection } from "../ui/Pace";
 import { wwwCompanion } from "../ProjectWizard";
 import { t, tn } from "../i18n";
 
@@ -154,6 +155,8 @@ export function ScopePanel() {
             <Plus size={14} /> {t("work.scope.addRule")}
           </button>
         </div>
+
+        <PaceSection />
 
         <RulesSection />
       </div>
