@@ -27,9 +27,9 @@ rmSync(FRAMES, { recursive: true, force: true });
 mkdirSync(FRAMES, { recursive: true });
 const HOST = process.env.DEMO_TARGET_HOST ?? "juice-shop.test";
 const TARGET = `http://${HOST}`;
-const MINUTES = Number(process.env.DEMO_MINUTES ?? 28);
+const MINUTES = Number(process.env.DEMO_MINUTES ?? 12);
 const DRY = process.env.DEMO_DRY === "1";
-const LAPSE_SECONDS = 24; // the Maestro's work, however long, plays in this many seconds
+const LAPSE_SECONDS = 20; // the Maestro's work, however long, plays in this many seconds
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -231,7 +231,7 @@ const scene = (name) => {
 // ---------------------------------------------------------------------------------------------
 // Intro.
 scene("intro");
-await sleep(5200);
+await sleep(4500);
 await cut(async () => {
   // No AI on this machine (a dry run): the window that offers one is not part of the film.
   if (await stage(`exists(${S({ text: "Later", sel: "button" })})`)) await stage(`click(${S({ text: "Later", sel: "button" })})`);
@@ -266,7 +266,7 @@ await stage(`type("input[placeholder^='Target to check']", ${S(`https://pay.${HO
 await stage(`click({ text: "Check", sel: "button" })`);
 await until(".verdict");
 await stage(`highlight(".verdict", "Denied before anything is sent", true)`);
-await sleep(3800);
+await sleep(3000);
 await stage(`highlight(null)`);
 
 // ---------------------------------------------------------------------------------------------
@@ -278,7 +278,7 @@ const composer = ".composer textarea";
 await until(composer);
 const ask = `Assess the web app at ${TARGET}: map it, then test authentication, access control and injection. Prove every finding with evidence.`;
 await stage(`click(${S(composer)})`);
-await stage(`type(${S(composer)}, ${S(ask)}, 40)`);
+await stage(`type(${S(composer)}, ${S(ask)}, 70)`);
 await sleep(500);
 const maestroStart = Date.now();
 if (!DRY) await stage(`enter(${S(composer)})`);
@@ -389,7 +389,12 @@ await sleep(1500);
 scene("privacy");
 // A marker as the vault writes it: «email:3», «card:1 …».
 const markerQ = { re: "«[a-z_]+:\\d+", sel: "p, li, code, span, td" };
-await caption("Privacy", "The model reads <em>«email:3»</em>. The real address never leaves your machine.");
+// The real counts of this run: what the detectors replaced with markers before the model read it.
+const masked = await api("privacy.report", on()).then((p) => p.masked ?? {}).catch(() => ({}));
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const parts = [["email", "email", "emails"], ["secret", "secret", "secrets"], ["name", "name", "names"]].filter(([k]) => masked[k]).map(([k, one, many]) => plural(masked[k], one, many));
+const maskedLine = parts.length ? `${parts.join(", ")} <em>masked before the model read them.</em>` : "Client data is <em>masked before the model reads it.</em>";
+await caption("Privacy", maskedLine);
 if (await stage(`exists(${S(markerQ)})`)) {
   await stage(`zoom(${S(markerQ)}, 1.7)`);
   await sleep(1500);
@@ -405,7 +410,7 @@ const statQ = { text: "Privacy towards the model", sel: "section" };
 await until(statQ, 6000);
 if (await stage(`exists(${S(statQ)})`)) {
   await stage(`highlight(${S(statQ)}, "Masked before the model read it")`);
-  await sleep(3800);
+  await sleep(4200);
   await stage(`highlight(null)`);
 }
 
@@ -429,7 +434,7 @@ if (best) {
   if (await stage(`exists(${S(evQ)})`)) {
     await stage(`point(${S(evQ)})`);
     await stage(`zoom(${S(evQ)}, 1.35)`);
-    await sleep(3600);
+    await sleep(2800);
     await stage(`zoom(null)`);
     await sleep(1200);
   } else await sleep(3000);
@@ -454,18 +459,20 @@ await sleep(1200);
 const prevQ = { text: "Preview", sel: ".report-actions button, button" };
 if (await stage(`exists(${S(prevQ)})`)) await stage(`click(${S(prevQ)})`);
 await until(".report-paper", 20000);
+// The preview opens under the options: bring it up, as a person would scroll to it.
+await stage(`inApp(${S("(w) => w.document.querySelector('.report-paper')?.scrollIntoView({ behavior: 'smooth', block: 'start' })")})`);
 await sleep(2500);
 await stage(`cursor(false)`);
 // The report is a sandboxed frame: it scrolls with the wheel, as a person would scroll it.
 const paper = await stage(`center(".report-paper")`);
 if (paper) {
   await sleep(1500);
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 30; i++) {
     await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: paper.x, y: paper.y, deltaX: 0, deltaY: 45 });
     await sleep(45);
   }
   await sleep(2500);
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 30; i++) {
     await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: paper.x, y: paper.y, deltaX: 0, deltaY: 45 });
     await sleep(45);
   }
@@ -479,7 +486,7 @@ await sleep(1200);
 // End card.
 scene("outro");
 await stage(`card("outro", true)`);
-await sleep(6500);
+await sleep(5500);
 await send("Page.stopScreencast");
 await sleep(500);
 

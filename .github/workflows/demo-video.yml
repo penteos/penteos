@@ -10,7 +10,7 @@ on:
       minutes:
         description: "The most the Maestro may work, in minutes"
         required: false
-        default: "28"
+        default: "12"
 
 permissions:
   contents: read
@@ -44,7 +44,7 @@ jobs:
       - name: Film
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          DEMO_MINUTES: ${{ github.event.inputs.minutes || '28' }}
+          DEMO_MINUTES: ${{ github.event.inputs.minutes || '12' }}
           DEMO_OUT: ${{ github.workspace }}/demo
         run: node scripts/demo/video/record.mjs
       - uses: actions/upload-artifact@v7

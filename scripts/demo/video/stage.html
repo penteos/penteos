@@ -344,7 +344,7 @@
       return true;
     },
     /** Types into an input or textarea the way React sees it, a few characters at a time. */
-    async type(q, text, cps = 28) {
+    async type(q, text, cps = 45) {
       const el = find(q);
       if (!el) return false;
       el.focus();
@@ -408,7 +408,8 @@
       const el = find(q);
       if (!el) return null;
       const b = box(el);
-      return { x: 160 + 1 + b.x + b.w / 2, y: 34 + 1 + b.y + b.h / 2 };
+      // Near its top when it is taller than the window, so the point is on screen.
+      return { x: 160 + 1 + b.x + b.w / 2, y: 34 + 1 + Math.min(b.y + b.h / 2, b.y + 220, 860) };
     },
     text(q) { return find(q)?.textContent ?? null; },
     exists(q) { return Boolean(find(q)); },
