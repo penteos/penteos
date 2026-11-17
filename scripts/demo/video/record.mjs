@@ -161,7 +161,8 @@ const pageErrors = [];
 
 // The film: every frame Chrome paints, with its time and the speed it plays at.
 const frames = [];
-let speed = 1; // 1 = real time; >1 = time-lapse; Infinity = cut
+const LAPSE = "lapse"; // frames of the time-lapse: their speed is set when the cut is made
+let speed = 1; // 1 = real time; LAPSE; Infinity = cut
 ws.on("message", (m) => {
   const msg = JSON.parse(String(m));
   if (msg.id && waiting.has(msg.id)) waiting.get(msg.id)(msg), waiting.delete(msg.id);
@@ -291,6 +292,8 @@ await stage(`cursor(false)`);
 const running = async () => {
   const st = await maestroState();
   if (st.running || st.parked || st.unknown) return true;
+  // A decision waiting for the operator: the loop takes it on its next pass.
+  if ((await api("approval.list", on()).catch(() => [])).some((x) => x.request?.kind !== "findings")) return true;
   const runs = await api("run.list", on({ limit: 50 })).catch(() => []);
   return (Array.isArray(runs) ? runs : (runs.runs ?? [])).some((r) => r.status === "running" || r.status === "queued" || r.status === "pending");
 };
@@ -309,13 +312,39 @@ if (!DRY) {
   const dwell = Math.max(60_000, (limit / 60_000) * 6_000); // ~3 s of a 24 s time-lapse
   await openPanel(shown);
   await sleep(10_000);
-  speed = 40; // provisional; the encoder applies the real factor
-  const lapseFrom = frames.length;
+  speed = LAPSE;
+  let decisionsFilmed = false;
   while (Date.now() - maestroStart < limit) {
     const elapsed = Date.now() - maestroStart;
     const now = Object.fromEntries(await Promise.all(Object.keys(kinds).map(async (k) => [k, await count(k)])));
     const routes = now.endpoint;
     await stage(`lapse(true, ${S(`${Math.floor(elapsed / 60_000)} min · ${routes} routes · ${now.service} services · ${now.finding} findings`)})`);
+    // The operator's part: the Maestro asks before a new phase and before risky steps. The first
+    // decision is filmed in real time, the rest are taken as they come.
+    // Findings wait: the operator approves them on camera, in the findings scene.
+    const pending = (await api("approval.list", on()).catch(() => [])).filter((a) => (!a.status || a.status === "pending") && a.request?.kind !== "findings");
+    for (const a of pending) {
+      if (!decisionsFilmed && (await stage(`exists(".approval-card .btn.sm.primary")`))) {
+        decisionsFilmed = true;
+        speed = 1;
+        await stage(`lapse(false)`);
+        await caption("You decide", "New phases and risky steps <em>wait for your OK.</em>");
+        await stage(`cursor(true)`);
+        await stage(`zoom(".approval-card", 1.45)`);
+        await sleep(2600);
+        await stage(`click(".approval-card .btn.sm.primary")`);
+        await sleep(2200);
+        await stage(`zoom(null)`);
+        await stage(`cursor(false)`);
+        await sleep(1200);
+        await caption("Autopilot", "It maps, tests and proves. <em>Every step inside the scope.</em>");
+        speed = LAPSE;
+        run.decisionFilmed = a.summary ?? a.id;
+        continue;
+      }
+      await api("approval.approve", on({ approvalId: a.id })).catch((e) => log("approve failed:", e.message));
+      (run.approved ??= []).push(a.summary ?? a.request?.kind ?? a.id);
+    }
     if (Date.now() - shownAt >= dwell) {
       // What grew, most telling first.
       const grew = Object.keys(kinds).find((k) => now[k] > seen[k]);
@@ -338,6 +367,7 @@ if (!DRY) {
       // Finished, or waiting on the operator: give it a moment to start again before calling it done.
       let quiet = true;
       for (let i = 0; i < 6 && quiet; i++) {
+        // Waiting on a decision is not quiet: let the loop take it.
         await sleep(15_000);
         quiet = !(await running());
       }
@@ -348,7 +378,7 @@ if (!DRY) {
   if ((await maestroState()).running) coreWs.send(JSON.stringify({ t: "agent.stop" }));
   await sleep(3000);
   run.maestroMinutes = Math.round((Date.now() - maestroStart) / 6000) / 10;
-  run.lapse = { from: lapseFrom, to: frames.length };
+
   await stage(`lapse(false)`);
   speed = 1;
 }
@@ -456,13 +486,12 @@ await sleep(500);
 // ---------------------------------------------------------------------------------------------
 // 3. The cut: each frame lasts until the next one, divided by its speed; the time-lapse is
 // fitted to LAPSE_SECONDS whatever the Maestro took.
-if (run.lapse) {
-  const a = frames[run.lapse.from];
-  const b = frames[run.lapse.to - 1];
-  const real = a && b ? b.t - a.t : 0;
+{
+  let real = 0;
+  for (let i = 0; i + 1 < frames.length; i++) if (frames[i].speed === LAPSE) real += frames[i + 1].t - frames[i].t;
   const factor = real > LAPSE_SECONDS ? real / LAPSE_SECONDS : 1;
-  for (let i = run.lapse.from; i < run.lapse.to; i++) frames[i].speed = factor;
-  run.lapse.factor = Math.round(factor);
+  for (const f of frames) if (f.speed === LAPSE) f.speed = factor;
+  run.lapse = { realSeconds: Math.round(real), factor: Math.round(factor) };
 }
 const lines = [];
 for (let i = 0; i < frames.length; i++) {
