@@ -16,10 +16,19 @@
 
 <p align="center">
   <a href="https://penteos.com">Website</a> ·
+  <a href="https://youtu.be/uP8LDN0gtfc">Demo video</a> ·
   <a href="#install">Install</a> ·
   <a href="#three-rules-it-cannot-break">How it works</a> ·
   <a href="SECURITY.md">Security</a> ·
   <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+<br>
+
+<p align="center">
+  <a href="https://youtu.be/uP8LDN0gtfc"><img src="https://img.youtube.com/vi/uP8LDN0gtfc/maxresdefault.jpg" alt="Watch the demo: a real Penteos run against OWASP Juice Shop" width="88%"></a>
+  <br>
+  <b><a href="https://youtu.be/uP8LDN0gtfc">▶ Watch a real run</a></b>: 13 minutes of the Maestro against OWASP Juice Shop, 11 findings with evidence, client data masked, in 2 minutes. Unedited, only sped up.
 </p>
 
 <br>
