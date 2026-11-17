@@ -130,8 +130,16 @@ const require = createRequire(join(root, "packages", "server", "package.json"));
 const WebSocket = require("ws");
 const chrome = spawn(process.env.CHROME ?? "google-chrome", ["--headless=new", "--remote-debugging-port=9337", "--window-size=1920,1080", "--no-sandbox", "--autoplay-policy=no-user-gesture-required", "--hide-scrollbars", "--font-render-hinting=none", `--user-data-dir=${join(dataDir, "chrome")}`, "about:blank"], { stdio: "ignore", detached: true });
 children.push(chrome);
-await sleep(2000);
-const page = (await (await fetch("http://127.0.0.1:9337/json")).json()).find((t) => t.type === "page");
+// Chrome takes its time on a cold machine: wait for its DevTools endpoint.
+let page;
+for (let i = 0; i < 60 && !page; i++) {
+  await sleep(500);
+  page = await fetch("http://127.0.0.1:9337/json")
+    .then((r) => r.json())
+    .then((list) => list.find((t) => t.type === "page"))
+    .catch(() => undefined);
+}
+if (!page) throw new Error("Chrome did not start");
 const ws = new WebSocket(page.webSocketDebuggerUrl, { maxPayload: 256 * 1024 * 1024 });
 await new Promise((r) => ws.on("open", r));
 let seq = 0;
