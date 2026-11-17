@@ -291,20 +291,44 @@ const running = async () => {
   return st.running || st.parked || Boolean(st.unknown);
 };
 if (!DRY) {
-  const panels = ["coverage", "findings", "board", "hosts", "findings"];
-  let shown = -1;
+  // The camera follows the work: whatever just appeared is what it shows (a new finding opened,
+  // new routes on the surface, new services), and it stays on each long enough to be read once
+  // the time-lapse is applied (about 3 s of film).
+  const count = async (kind) => (await api("entity.query", on({ kind, limit: 1000 })).catch(() => [])).length;
+  const kinds = { finding: "findings", endpoint: "surface", webapp: "surface", service: "services", host: "hosts" };
+  const seen = Object.fromEntries(Object.keys(kinds).map((k) => [k, 0]));
+  const idle = ["coverage", "surface", "board"];
+  let shown = "coverage";
+  let shownAt = Date.now();
+  let idleNext = 1;
   const limit = MINUTES * 60_000;
+  const dwell = Math.max(60_000, (limit / 60_000) * 6_000); // ~3 s of a 24 s time-lapse
+  await openPanel(shown);
   await sleep(10_000);
   speed = 40; // provisional; the encoder applies the real factor
   const lapseFrom = frames.length;
   while (Date.now() - maestroStart < limit) {
     const elapsed = Date.now() - maestroStart;
-    const minutes = Math.floor(elapsed / 60_000);
-    await stage(`lapse(true, ${S(`${minutes} min of real work`)})`);
-    const want = Math.min(panels.length - 1, Math.floor((elapsed / limit) * panels.length));
-    if (want !== shown) {
-      shown = want;
-      await openPanel(panels[want]);
+    const now = Object.fromEntries(await Promise.all(Object.keys(kinds).map(async (k) => [k, await count(k)])));
+    const routes = now.endpoint;
+    await stage(`lapse(true, ${S(`${Math.floor(elapsed / 60_000)} min · ${routes} routes · ${now.service} services · ${now.finding} findings`)})`);
+    if (Date.now() - shownAt >= dwell) {
+      // What grew, most telling first.
+      const grew = Object.keys(kinds).find((k) => now[k] > seen[k]);
+      let next = grew ? kinds[grew] : idle[idleNext++ % idle.length];
+      if (grew === "finding") {
+        const list = await api("entity.query", on({ kind: "finding", limit: 1000 })).catch(() => []);
+        const newest = list[list.length - 1];
+        if (newest) {
+          await stage(`inApp(${S("(w, id, t) => w.__penteos.workbench.openFinding(id, t)")}, ${S(newest.id)}, ${S(newest.attributes.title)})`);
+          next = `finding:${newest.id}`;
+        }
+      } else if (next !== shown) await openPanel(next);
+      if (next !== shown || grew) {
+        shown = next;
+        shownAt = Date.now();
+      }
+      Object.assign(seen, now);
     }
     if (!(await running())) {
       // Finished, or waiting on the operator: give it a moment to start again before calling it done.
