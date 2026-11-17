@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Penteos demo stage</title>
+<!--
+  The stage the demo video is filmed on: the real workbench in an iframe (same origin, served by
+  Vite next to the app), framed as a window, with a pointer, zooms, highlights and captions that
+  the director (record.mjs) drives through window.stage. Nothing here touches the app's data: it
+  only clicks and types, as a person would.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --void: #07040d;
+    --panel: #120b22;
+    --line: #2a1d48;
+    --line-hi: #4a3580;
+    --violet: #8b6cf0;
+    --violet-hi: #b9a4ff;
+    --torch: #ff9a2e;
+    --torch-hi: #ffc46b;
+    --ok: #54e58a;
+    --bad: #ff4d6d;
+    --fg: #ece6ff;
+    --fg-dim: #a99cc9;
+    --fg-mute: #6f6390;
+    --display: "Chakra Petch", "IBM Plex Sans", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    background: var(--void);
+    color: var(--fg);
+    font-family: "IBM Plex Sans", sans-serif;
+  }
+  .bg {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(900px 600px at 12% 8%, rgba(139, 108, 240, 0.22), transparent 70%),
+      radial-gradient(800px 500px at 92% 100%, rgba(255, 154, 46, 0.14), transparent 70%),
+      linear-gradient(180deg, #0b0716, #07040d);
+  }
+  .bg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(rgba(139, 108, 240, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(139, 108, 240, 0.05) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at center, #000 30%, transparent 80%);
+  }
+
+  /* The window: title bar + the app at 1600x900. */
+  .win {
+    position: absolute;
+    left: 160px;
+    top: 34px;
+    width: 1600px;
+    height: 934px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--line-hi);
+    background: #0d0818;
+    box-shadow: 0 40px 120px -30px rgba(139, 108, 240, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.6);
+    transform-origin: 50% 50%;
+    transition: transform 1.3s cubic-bezier(0.65, 0, 0.25, 1);
+  }
+  .bar {
+    height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px;
+    background: linear-gradient(180deg, #171030, #120b22);
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--fg-mute);
+  }
+  .bar i { width: 11px; height: 11px; border-radius: 50%; background: #2c2244; display: inline-block; }
+  .bar b { margin-left: 10px; color: var(--fg-dim); font-weight: 500; }
+  /* The app lays out at 1360x765 (a laptop) and is shown at 1600x900: larger type on a phone. */
+  .view { width: 1600px; height: 900px; overflow: hidden; }
+  iframe { display: block; width: 1360px; height: 765px; border: 0; background: #0d0818; transform: scale(1.17647); transform-origin: 0 0; }
+
+  /* Pointer, click ripple, highlight: inside the window, so a zoom carries them along. */
+  .cursor {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 26px;
+    height: 26px;
+    z-index: 20;
+    pointer-events: none;
+    transform: translate(800px, 520px);
+    transition: transform 0.75s cubic-bezier(0.45, 0, 0.2, 1), opacity 0.3s;
+    filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.6));
+  }
+  .ripple {
+    position: absolute;
+    width: 46px;
+    height: 46px;
+    margin: -23px 0 0 -23px;
+    border-radius: 50%;
+    border: 2px solid var(--torch);
+    z-index: 19;
+    pointer-events: none;
+    animation: ripple 0.6s ease-out forwards;
+  }
+  @keyframes ripple { from { transform: scale(0.3); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
+  .hl {
+    position: absolute;
+    z-index: 18;
+    pointer-events: none;
+    border: 2px solid var(--torch);
+    border-radius: 8px;
+    box-shadow: 0 0 0 4000px rgba(7, 4, 13, 0.55), 0 0 30px rgba(255, 154, 46, 0.55);
+    opacity: 0;
+    transition: opacity 0.5s, left 0.6s, top 0.6s, width 0.6s, height 0.6s;
+  }
+  .hl.on { opacity: 1; }
+  .hl span {
+    position: absolute;
+    left: -2px;
+    bottom: calc(100% + 10px);
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 500;
+    color: #1a0f00;
+    background: var(--torch);
+    padding: 5px 10px;
+    border-radius: 4px;
+  }
+  .hl.below span { bottom: auto; top: calc(100% + 10px); }
+
+  /* Captions, under the window. */
+  .cap {
+    position: absolute;
+    left: 160px;
+    right: 160px;
+    top: 984px;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.45s, transform 0.45s;
+  }
+  .cap.on { opacity: 1; transform: none; }
+  .cap .k {
+    flex: none;
+    font-family: var(--mono);
+    font-size: 15px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--torch);
+    padding: 6px 12px;
+    border: 1px solid rgba(255, 154, 46, 0.45);
+  }
+  .cap .t { font-family: var(--display); font-size: 38px; font-weight: 600; letter-spacing: 0.005em; line-height: 1.1; }
+  .cap .t em { font-style: normal; background: linear-gradient(95deg, var(--violet-hi), var(--torch)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  /* Time-lapse badge. */
+  .lapse {
+    position: absolute;
+    right: 186px;
+    top: 52px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--mono);
+    font-size: 16px;
+    color: var(--fg);
+    background: rgba(13, 8, 24, 0.92);
+    border: 1px solid var(--line-hi);
+    padding: 10px 16px;
+    border-radius: 8px;
+    opacity: 0;
+    transition: opacity 0.4s;
+  }
+  .lapse.on { opacity: 1; }
+  .lapse .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 12px var(--bad); animation: blink 1s steps(2) infinite; }
+  .lapse b { color: var(--torch-hi); font-weight: 500; }
+  @keyframes blink { 50% { opacity: 0.25; } }
+
+  /* Title cards: intro and end. */
+  .card {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 200px;
+    background: var(--void);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.9s;
+  }
+  .card.on { opacity: 1; }
+  .card video, .card .art {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.55;
+  }
+  .card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(7, 4, 13, 0.96) 0%, rgba(7, 4, 13, 0.75) 45%, rgba(7, 4, 13, 0.2) 100%);
+  }
+  .card > div { position: relative; z-index: 2; }
+  .brand { display: flex; align-items: center; gap: 18px; font-family: var(--mono); font-size: 22px; letter-spacing: 0.4em; margin-bottom: 40px; }
+  .brand img { width: 52px; height: 52px; }
+  .h1 { font-family: var(--display); font-size: 112px; font-weight: 700; line-height: 0.98; letter-spacing: -0.01em; margin: 0; }
+  .h1 em { font-style: normal; color: var(--torch); }
+  .sub { margin-top: 30px; max-width: 980px; font-size: 30px; line-height: 1.45; color: var(--fg-dim); }
+  .sub b { color: var(--fg); font-weight: 500; }
+  .rows { margin-top: 44px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .rows span { font-family: var(--mono); font-size: 20px; color: var(--fg); border: 1px solid var(--line-hi); background: rgba(18, 11, 34, 0.7); padding: 10px 16px; }
+  .rows span::before { content: "✓ "; color: var(--ok); }
+  .cta { margin-top: 48px; font-family: var(--mono); font-size: 30px; color: var(--fg); }
+  .cta b { color: var(--torch); font-weight: 500; }
+  .reveal > * { opacity: 0; transform: translateY(24px); transition: opacity 0.8s, transform 0.8s; }
+  .card.on .reveal > * { opacity: 1; transform: none; }
+  .card.on .reveal > *:nth-child(2) { transition-delay: 0.35s; }
+  .card.on .reveal > *:nth-child(3) { transition-delay: 0.7s; }
+  .card.on .reveal > *:nth-child(4) { transition-delay: 1.05s; }
+  .card.on .reveal > *:nth-child(5) { transition-delay: 1.4s; }
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="win" id="win">
+  <div class="bar"><i></i><i></i><i></i><b id="wintitle">Penteos</b></div>
+  <div class="view"><iframe id="app" title="Penteos"></iframe></div>
+  <svg class="cursor" id="cursor" viewBox="0 0 24 24"><path d="M4 2l15 11.5-6.6 1 3.9 7.2-2.6 1.4-3.9-7.3L4 20.5z" fill="#fff" stroke="#07040d" stroke-width="1.4" stroke-linejoin="round" /></svg>
+  <div class="hl" id="hl"><span></span></div>
+</div>
+<div class="cap" id="cap"><span class="k"></span><span class="t"></span></div>
+<div class="lapse" id="lapse"><span class="dot"></span><span>TIME-LAPSE</span><b id="lapsetext"></b></div>
+
+<div class="card" id="intro">
+  <video src="https://penteos.com/art/hero.webm" muted autoplay loop playsinline></video>
+  <div class="reveal">
+    <div class="brand"><img src="https://penteos.com/art/badge-helmet.png" alt="" />PENTEOS</div>
+    <h1 class="h1">The AI pentest<br /><em>workbench.</em></h1>
+    <p class="sub">Recon to report in one place, with an agent that <b>stays in scope</b> and <b>masks your client's data</b> before the AI reads it.</p>
+    <p class="cta">A real run. Unedited, only sped up.</p>
+  </div>
+</div>
+
+<div class="card" id="outro">
+  <img class="art" src="https://penteos.com/art/torch.webp" alt="" />
+  <div class="reveal">
+    <div class="brand"><img src="https://penteos.com/art/badge-helmet.png" alt="" />PENTEOS</div>
+    <h1 class="h1">Never out of scope.<br /><em>Never in clear text.</em><br />Never without you.</h1>
+    <div class="rows"><span>Free and open source, AGPL-3.0</span><span>Linux and Mac</span><span>ChatGPT, DeepSeek, local models</span></div>
+    <p class="cta"><b>penteos.com</b> &nbsp;·&nbsp; github.com/penteos/penteos</p>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const app = () => $("app").contentWindow;
+  const doc = () => $("app").contentDocument;
+  let zoomed = { scale: 1, x: 0, y: 0 };
+
+  /** An element in the app: a CSS selector, or { text, sel } for the first match whose text contains it. */
+  function find(q) {
+    const d = doc();
+    if (!d) return null;
+    if (typeof q === "string") return d.querySelector(q);
+    const all = [...d.querySelectorAll(q.sel ?? "button, a, [role=tab], .tab, .dv-tab, li, span, div")];
+    const re = q.re ? new RegExp(q.re) : null;
+    const hits = all.filter((e) => e.offsetParent !== null && (re ? re.test(e.textContent ?? "") : (e.textContent ?? "").includes(q.text)));
+    // The innermost match: the label itself, not every box around it.
+    return hits.find((e) => !hits.some((o) => o !== e && e.contains(o))) ?? null;
+  }
+  /** Where an element is, in window coordinates (under the title bar). */
+  function box(el) {
+    const r = el.getBoundingClientRect();
+    const k = 1.17647;
+    return { x: r.left * k, y: r.top * k + 34, w: r.width * k, h: r.height * k };
+  }
+
+  window.stage = {
+    ready: () => Boolean(app()?.__penteos),
+    load(url, title) {
+      $("app").src = url;
+      $("wintitle").textContent = title ?? "Penteos";
+    },
+    title(t) { $("wintitle").textContent = t; },
+    caption(kicker, html) {
+      const c = $("cap");
+      if (!html) return c.classList.remove("on");
+      c.classList.remove("on");
+      setTimeout(() => {
+        c.querySelector(".k").textContent = kicker;
+        c.querySelector(".t").innerHTML = html;
+        c.classList.add("on");
+      }, c.classList.contains("on") ? 250 : 0);
+    },
+    card(id, on) { $(id).classList.toggle("on", on); },
+    lapse(on, text) {
+      $("lapse").classList.toggle("on", on);
+      if (text !== undefined) $("lapsetext").textContent = text;
+    },
+    cursor(on) { $("cursor").style.opacity = on ? "1" : "0"; },
+    async point(q, { dx = 0, dy = 0 } = {}) {
+      const el = find(q);
+      if (!el) return false;
+      el.scrollIntoView?.({ block: "nearest" });
+      const b = box(el);
+      $("cursor").style.transform = `translate(${b.x + Math.min(b.w / 2, 60) + dx}px, ${b.y + b.h / 2 + dy}px)`;
+      await sleep(850);
+      return true;
+    },
+    async click(q, opts) {
+      if (!(await stage.point(q, opts))) return false;
+      const el = find(q);
+      const b = box(el);
+      const r = document.createElement("div");
+      r.className = "ripple";
+      r.style.left = `${b.x + Math.min(b.w / 2, 60) + (opts?.dx ?? 0)}px`;
+      r.style.top = `${b.y + b.h / 2 + (opts?.dy ?? 0)}px`;
+      $("win").appendChild(r);
+      setTimeout(() => r.remove(), 700);
+      el.click();
+      await sleep(350);
+      return true;
+    },
+    /** Types into an input or textarea the way React sees it, a few characters at a time. */
+    async type(q, text, cps = 28) {
+      const el = find(q);
+      if (!el) return false;
+      el.focus();
+      const proto = el.tagName === "TEXTAREA" ? app().HTMLTextAreaElement.prototype : app().HTMLInputElement.prototype;
+      const set = Object.getOwnPropertyDescriptor(proto, "value").set;
+      let v = "";
+      for (const ch of text) {
+        v += ch;
+        set.call(el, v);
+        el.dispatchEvent(new (app().Event)("input", { bubbles: true }));
+        await sleep(1000 / cps);
+      }
+      return true;
+    },
+    async enter(q) {
+      const el = find(q);
+      if (!el) return false;
+      el.dispatchEvent(new (app().KeyboardEvent)("keydown", { key: "Enter", code: "Enter", bubbles: true }));
+      return true;
+    },
+    /** Zooms the window onto an element (or back out with null). */
+    zoom(q, scale = 1.6) {
+      const w = $("win");
+      if (!q) {
+        w.style.transform = "";
+        zoomed = { scale: 1, x: 0, y: 0 };
+        return true;
+      }
+      const el = find(q);
+      if (!el) return false;
+      const b = box(el);
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      // Keep the zoomed window covering the frame: the centre moves toward the element, clamped.
+      const W = 1600, H = 934;
+      const tx = Math.max(-(W * scale - W) / 2, Math.min((W * scale - W) / 2, (W / 2 - cx) * scale));
+      const ty = Math.max(-(H * scale - H) / 2, Math.min((H * scale - H) / 2, (H / 2 - cy) * scale));
+      w.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+      zoomed = { scale, x: tx, y: ty };
+      return true;
+    },
+    highlight(q, label, below = false) {
+      const h = $("hl");
+      if (!q) return h.classList.remove("on"), true;
+      const el = find(q);
+      if (!el) return false;
+      const b = box(el);
+      const pad = 6;
+      Object.assign(h.style, { left: `${b.x - pad}px`, top: `${b.y - pad}px`, width: `${b.w + pad * 2}px`, height: `${b.h + pad * 2}px` });
+      h.querySelector("span").textContent = label ?? "";
+      h.querySelector("span").style.display = label ? "" : "none";
+      h.classList.toggle("below", below);
+      h.classList.add("on");
+      return true;
+    },
+    /** Runs code in the app's page (its globals: __penteos). */
+    // The app's own CSP forbids eval there: the function runs here, with the app's window as w.
+    inApp(src, ...args) { return (0, eval)(`(${src})`)(app(), ...args); },
+    /** An element's centre in page coordinates (with the window unzoomed). */
+    center(q) {
+      const el = find(q);
+      if (!el) return null;
+      const b = box(el);
+      return { x: 160 + 1 + b.x + b.w / 2, y: 34 + 1 + b.y + b.h / 2 };
+    },
+    text(q) { return find(q)?.textContent ?? null; },
+    exists(q) { return Boolean(find(q)); },
+  };
+</script>
+</body>
+</html>

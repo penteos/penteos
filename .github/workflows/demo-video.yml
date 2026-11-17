@@ -1,0 +1,57 @@
+name: demo-video
+
+# The launch video, filmed on GitHub's machines: Penteos (from this commit) runs a real round with
+# the Maestro on DeepSeek against OWASP Juice Shop, a lab that is vulnerable on purpose, and
+# scripts/demo/video/record.mjs films it. The video and what happened (run.json) are the run's
+# artifact. Nothing is published by this workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "The most the Maestro may work, in minutes"
+        required: false
+        default: "28"
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    services:
+      juice:
+        image: bkimminich/juice-shop:latest
+        ports: ["80:3000"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @penteos/schema build
+      - name: ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: The lab's names
+        # juice-shop.test is the lab; pay.juice-shop.test is the host the scope leaves out.
+        run: echo "127.0.0.1 juice-shop.test pay.juice-shop.test" | sudo tee -a /etc/hosts
+      - name: Wait for the lab
+        run: |
+          for i in $(seq 1 60); do curl -fsS -o /dev/null http://juice-shop.test/ && break; sleep 3; done
+          curl -fsS -o /dev/null http://juice-shop.test/
+      - name: Film
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEMO_MINUTES: ${{ github.event.inputs.minutes || '28' }}
+          DEMO_OUT: ${{ github.workspace }}/demo
+        run: node scripts/demo/video/record.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: demo-video
+          path: |
+            demo/penteos-demo.mp4
+            demo/run.json
+          if-no-files-found: warn
