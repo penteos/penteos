@@ -75,7 +75,10 @@ describe("knowledge for the Maestro", () => {
   it("comes from plugins enabled in the project, for its mode, in its language", async () => {
     const w = await world();
     try {
-      expect(w.runtime.skillsFor(w.eng)).toEqual([{ plugin: "Hooks (lab)", title: "Método de la casa", text: "Always check **/.git/** on every web app." }]);
+      expect(w.runtime.skillsFor(w.eng)).toEqual([{ id: "lab.hooks/method", plugin: "Hooks (lab)", title: "Método de la casa", text: "Always check **/.git/** on every web app." }]);
+      // Read on demand by its id, when the Maestro has only the list.
+      expect(await w.op("skill.read", { id: "lab.hooks/method" })).toMatchObject({ title: "Método de la casa", text: "Always check **/.git/** on every web app." });
+      await expect(w.op("skill.read", { id: "lab.hooks/nope" })).rejects.toThrow(/there are: lab.hooks\/method/);
       w.eng.setInfo({ ...w.eng.info, plugins: [] }, human);
       expect(w.runtime.skillsFor(w.eng)).toEqual([]);
     } finally {

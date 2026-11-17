@@ -19,6 +19,21 @@ import { defineOperation, executeOperation, OperationError, type OperationContex
 // Only humans: a plugin is never approved, enabled or widened by an agent.
 // ---------------------------------------------------------------------------------------------
 
+defineOperation({
+  name: "skill.read",
+  title: "Read a plugin guide",
+  description: "The full text of a guide (skill) from a plugin enabled in this project, by the id shown in your instructions. Read it when the work you are about to do matches its title, before you start that part.",
+  kind: "read",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId: z.string().optional(), id: z.string().min(1) }),
+  handler: (input, ctx) => {
+    const skills = ctx.pluginRuntime?.skillsFor(ctx.engagement(input.engagementId)) ?? [];
+    const skill = skills.find((s) => s.id === input.id);
+    if (!skill) throw new OperationError("NOT_FOUND", `no guide ${input.id} in this project${skills.length ? `; there are: ${skills.map((s) => s.id).join(", ")}` : ""}`);
+    return skill;
+  },
+});
+
 const hostOf = (ctx: OperationContext): PluginHost => {
   if (!ctx.plugins) throw new OperationError("PLUGIN_UNAVAILABLE", "this core does not load plugins");
   return ctx.plugins;

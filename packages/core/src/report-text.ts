@@ -43,6 +43,9 @@ export interface ReportText {
   quotesChecked: string;
   /** Before what a finding proved by absence is: "Proved by absence". */
   absenceProof: string;
+  /** Heading of the chain that led to a finding (technical report). */
+  lineage: string;
+  lineageKinds: Record<"discovered" | "lead" | "action" | "proof" | "finding" | "verified" | "approved", string>;
   remediation: string;
   references: string;
   surface: string;
@@ -117,6 +120,8 @@ const es: ReportText = {
   evidenceMissing: "_(contenido de evidencia no disponible)_",
   quotesChecked: "Verificado en la respuesta",
   absenceProof: "Probado por ausencia",
+  lineage: "Cómo se llegó",
+  lineageKinds: { discovered: "Descubierto", lead: "Indicio", action: "Prueba", proof: "Evidencia", finding: "Hallazgo registrado", verified: "Verificación independiente", approved: "Aprobado por" },
   remediation: "Recomendación",
   references: "Referencias",
   surface: "Superficie observada",
@@ -202,6 +207,8 @@ const en: ReportText = {
   evidenceMissing: "_(evidence content not available)_",
   quotesChecked: "Checked in the response",
   absenceProof: "Proved by absence",
+  lineage: "How it was reached",
+  lineageKinds: { discovered: "Discovered", lead: "Lead", action: "Test", proof: "Evidence", finding: "Finding written", verified: "Independent verification", approved: "Approved by" },
   remediation: "Recommendation",
   references: "References",
   surface: "Observed surface",

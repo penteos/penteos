@@ -404,6 +404,16 @@ export class Engagement {
       primary key (entity_id, plugin_id)
     )`);
     db.exec("create index if not exists entity_ext_plugin on entity_ext (plugin_id)");
+    // What the agents did and why (the one line of intent they give with an action), with the ids it
+    // touched: the trail "how it was found" is rebuilt from (lineage.ts).
+    db.exec(`create table if not exists agent_steps (
+      seq integer primary key autoincrement,
+      at text not null,
+      actor text not null,
+      op text not null,
+      intent text,
+      refs text not null
+    )`);
     return new Engagement(dir, db, types);
   }
 
@@ -918,6 +928,30 @@ export class Engagement {
       )
       .run(hex, meta.type, meta.mime, bytes.length, meta.runId ?? null, meta.originalName ?? null, new Date().toISOString());
     return `sha256:${hex}`;
+  }
+
+  /** One agent action, with its stated intent and the ids it touched (lineage.ts reads them back). */
+  recordStep(actor: Actor, op: string, intent: string | undefined, refs: string[]): void {
+    if (!refs.length && !intent) return;
+    this.db.prepare("insert into agent_steps (at, actor, op, intent, refs) values (?, ?, ?, ?, ?)").run(new Date().toISOString(), JSON.stringify(actor), op, intent?.slice(0, 300) ?? null, JSON.stringify(refs.slice(0, 40)));
+  }
+
+  /** The agent actions that touched any of these ids, oldest first. */
+  stepsTouching(ids: string[], limit = 200): Array<{ at: string; actor: Actor; op: string; intent?: string; refs: string[] }> {
+    const wanted = [...new Set(ids.filter(Boolean))].slice(0, 60);
+    if (!wanted.length) return [];
+    const rows = this.db
+      .prepare(`select * from agent_steps where ${wanted.map(() => "refs like ?").join(" or ")} order by seq asc limit ?`)
+      .all(...wanted.map((id) => `%"${id.replace(/[%_]/g, "")}"%`), limit) as Array<Record<string, string>>;
+    return rows.map((r) => ({ at: r.at!, actor: JSON.parse(r.actor!) as Actor, op: r.op!, ...(r.intent ? { intent: r.intent } : {}), refs: JSON.parse(r.refs!) as string[] }));
+  }
+
+  /** How a raw artifact was stored: by which run, as what. */
+  rawInfo(ref: string): { type: string; runId?: string; originalName?: string; storedAt: string } | undefined {
+    const hex = ref.replace(/^sha256:/, "");
+    if (!/^[0-9a-f]{64}$/.test(hex)) return undefined;
+    const r = this.db.prepare("select type, run_id, original_name, stored_at from raw_artifacts where sha256 = ?").get(hex) as Record<string, string | null> | undefined;
+    return r ? { type: r.type!, ...(r.run_id ? { runId: r.run_id } : {}), ...(r.original_name ? { originalName: r.original_name } : {}), storedAt: r.stored_at! } : undefined;
   }
 
   /** Whether a raw artifact with this reference was stored in this engagement. */

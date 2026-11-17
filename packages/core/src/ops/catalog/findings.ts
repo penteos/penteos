@@ -5,6 +5,7 @@ import type { ReplaceRule } from "../../proxy/intercept.js";
 import { engagementId, untrusted } from "./shared.js";
 import { openDeepening } from "../../impact.js";
 import { checkQuotes, MIN_QUOTE, NEEDS_PROOF, proofOf } from "../../proof.js";
+import { findingLineage } from "../../lineage.js";
 
 /** For a finding proved by something missing: the textual proof is then what was looked at. */
 const ABSENCE_PROOF = z
@@ -374,6 +375,23 @@ defineOperation({
     const edited = e.editEntity(input.id, { verification }, ctx.caller.actor);
     e.emit({ type: "verification.done", findingId: input.id, title: String(finding.attributes.title), verdict: input.verdict, summary: input.summary });
     return edited;
+  },
+});
+
+defineOperation({
+  name: "finding.lineage",
+  title: "How a finding was reached",
+  description:
+    "The chain that led to a finding, oldest first: the affected asset discovered (by which tool), the observations that pointed at it, the actions taken on it with the intent stated for each, the evidence and how its output was obtained, the finding written, the verifier's verdict and the operator's approval.",
+  kind: "read",
+  actors: ["human", "agent"],
+  input: z.object({ engagementId, id: z.string() }),
+  handler: (input, ctx) => {
+    try {
+      return { steps: findingLineage(ctx.engagement(input.engagementId), input.id) };
+    } catch (e) {
+      throw new OperationError("NOT_FOUND", (e as Error).message);
+    }
   },
 });
 

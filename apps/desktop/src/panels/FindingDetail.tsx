@@ -54,6 +54,46 @@ function EvidenceItem(props: { id: string; findingId?: string; removable?: boole
   );
 }
 
+interface LineageStep {
+  at: string;
+  kind: "discovered" | "lead" | "action" | "proof" | "finding" | "verified" | "approved";
+  by: "tool" | "agent" | "verifier" | "human";
+  title: string;
+  how?: string;
+  why?: string;
+  refs: string[];
+  quotes?: number;
+}
+
+/** How the finding was reached (core: lineage.ts): oldest first, with the agent's own words on why. */
+function Lineage(props: { id: string }) {
+  const l = useOperation<{ steps: LineageStep[] }>("finding.lineage", { id: props.id }, { refreshOn: (e) => e.id === props.id });
+  const steps = l.data?.steps ?? [];
+  if (steps.length < 2) return null;
+  const day = (iso: string) => iso.slice(0, 10);
+  return (
+    <>
+      <div className="section-title">{t("work.detail.lineage.title")}</div>
+      <ol className="lineage">
+        {steps.map((s, i) => (
+          <li key={i} className={`lineage-step ${s.kind}`}>
+            <span className="lineage-when mono">
+              {i === 0 || day(steps[i - 1]!.at) !== day(s.at) ? `${new Date(s.at).toLocaleDateString()} ` : ""}
+              {new Date(s.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+            <span className="lineage-body">
+              <b>{t(`work.detail.lineage.${s.kind}`)}</b> {s.kind === "verified" ? t(`work.detail.lineage.verdict.${s.title}`) : s.title}
+              {s.quotes ? <span className="lineage-quotes">{t("work.detail.lineage.quotes", { n: s.quotes })}</span> : null}
+              {s.how ? <code className="lineage-how">{s.how}</code> : null}
+              {s.why ? <span className="lineage-why">«{s.why}»</span> : null}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
 function AssetLink(props: { id: string; location?: string }) {
   const { client, workbench } = useApp();
   const [entity, setEntity] = useState<Entity>();
@@ -205,6 +245,8 @@ export function FindingDetailPanel(props: { params: { id: string } }) {
         {((a.instances as Array<{ id: string; entity: { id: string }; location?: string }>) ?? []).map((i) => (
           <AssetLink key={i.id} id={i.entity.id} {...(i.location ? { location: i.location } : {})} />
         ))}
+
+        <Lineage id={f!.id} />
 
         <div className="section-title">{t("work.detail.evidence")}</div>
         <div style={{ padding: "0 20px 20px", display: "flex", flexDirection: "column", gap: 10 }}>

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { CAPABILITIES, type CapabilityId, listGaps, type Caller, type ChangeEvent, type Engagement, type Language, type OperationContext, type PluginProviderInfo, impactLeads, leadsLine, meterEgress, openQuestions, resetRepeatGuard, textForModel, Vault, type Workspace } from "@penteos/core";
+import { CAPABILITIES, type CapabilityId, listGaps, type Caller, type ChangeEvent, type Engagement, type Language, type OperationContext, type PluginProviderInfo, impactLeads, leadsLine, meterEgress, openQuestions, resetRepeatGuard, textForModel, Vault, type Workspace, SKILL_LIMITS } from "@penteos/core";
 import { isAutoPilot } from "@penteos/schema";
 import { AnthropicSession } from "./providers/anthropic.js";
 import { ClaudeCodeSession, CodexSession } from "./providers/cli.js";
@@ -384,24 +384,33 @@ export class AgentManager {
     this.statusCache = undefined;
   }
 
-  private pluginSkills: (engagement: Engagement) => Array<{ plugin: string; title: string; text: string }> = () => [];
+  private pluginSkills: (engagement: Engagement) => Array<{ id: string; plugin: string; title: string; text: string }> = () => [];
 
   /** What plugins enabled in a project teach the Maestro there (the plugin runtime). */
-  usePluginSkills(source: (engagement: Engagement) => Array<{ plugin: string; title: string; text: string }>): void {
+  usePluginSkills(source: (engagement: Engagement) => Array<{ id: string; plugin: string; title: string; text: string }>): void {
     this.pluginSkills = source;
   }
 
   /** The system prompt plus what the project's plugins teach the Maestro. */
   private withSkills(system: string, engagement: Engagement): string {
-    let skills: Array<{ plugin: string; title: string; text: string }> = [];
+    let skills: Array<{ id: string; plugin: string; title: string; text: string }> = [];
     try {
       skills = this.pluginSkills(engagement);
     } catch {
       /* a plugin problem never breaks the Maestro */
     }
     if (!skills.length) return system;
-    const parts = skills.map((s) => `### ${s.title} (plugin ${s.plugin})\n${s.text.trim()}`);
-    return `${system}\n\n## Knowledge from plugins the operator installed in this project\nThe operator chose these plugins; follow their guidance where it fits, within your rules above (scope, approvals and safety always come first).\n\n${parts.join("\n\n")}`;
+    const head = `${system}\n\n## Knowledge from plugins the operator installed in this project\nThe operator chose these plugins; follow their guidance where it fits, within your rules above (scope, approvals and safety always come first).`;
+    // Short guides go whole; many or long ones as a list the Maestro reads from when the work calls
+    // for it, so they do not fill its memory on every step of a round that never needs them.
+    const total = skills.reduce((n, s) => n + s.text.length, 0);
+    if (total <= SKILL_LIMITS.total) return `${head}\n\n${skills.map((s) => `### ${s.title} (plugin ${s.plugin})\n${s.text.trim()}`).join("\n\n")}`;
+    const gist = (text: string) => {
+      const line = text.replace(/^#+.*$/gm, "").replace(/\s+/g, " ").trim();
+      const first = /^(.{20,220}?[.!?])(\s|$)/.exec(line)?.[1] ?? line.slice(0, 200);
+      return first.length < line.length && !/[.!?]$/.test(first) ? `${first}…` : first;
+    };
+    return `${head}\nRead a guide with skill_read (its id) when the work you are about to do matches its title, before you start that part:\n${skills.map((s) => `- ${s.title} (plugin ${s.plugin}) · id ${s.id}: ${gist(s.text)}`).join("\n")}`;
   }
 
   /** Where the providers of running plugins come from (the plugin runtime). */

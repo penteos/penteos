@@ -111,7 +111,8 @@ export interface StepTrace {
 }
 
 /** Skills: what all plugins together may add to the Maestro's prompt in one project. */
-export const SKILL_LIMITS = { total: 24_000 } as const;
+/** Up to this many characters of plugin guides go whole into the Maestro's instructions; beyond, a list it reads from on demand. */
+export const SKILL_LIMITS = { total: 6_000 } as const;
 /** Proxy hooks: viewing calls at once per plugin, and the most any call may run. */
 export const PROXY_LIMITS = { inFlight: 16, hardTimeoutMs: 30_000, bodyBytes: 1024 * 1024 } as const;
 const message_ = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -411,19 +412,20 @@ export class PluginRuntime {
     }
   }
 
-  /** What plugins enabled in a project teach the Maestro there (skills), at most SKILL_LIMITS.total characters. */
-  skillsFor(engagement: Engagement): Array<{ plugin: string; title: string; text: string }> {
-    const out: Array<{ plugin: string; title: string; text: string }> = [];
-    let used = 0;
+  /**
+   * What plugins enabled in a project teach the Maestro there (skills), every one: the Maestro reads
+   * them all when they are short (SKILL_LIMITS.total) and otherwise gets the list and reads a guide
+   * when the work calls for it (skill.read).
+   */
+  skillsFor(engagement: Engagement): Array<{ id: string; plugin: string; title: string; text: string }> {
+    const out: Array<{ id: string; plugin: string; title: string; text: string }> = [];
     const info = engagement.info;
     for (const pluginId of info.plugins) {
       const plugin = this.plugins.get(pluginId);
       if (!plugin || !this.usableIn(pluginId, engagement).ok) continue;
       for (const skill of plugin.manifest.contributes.skills ?? []) {
         if (skill.modes?.length && !skill.modes.includes(info.mode)) continue;
-        if (used + skill.text.length > SKILL_LIMITS.total) continue;
-        used += skill.text.length;
-        out.push({ plugin: plugin.manifest.name, title: textOf(skill.title, info.language ?? "en"), text: skill.text });
+        out.push({ id: `${pluginId}/${skill.id}`, plugin: plugin.manifest.name, title: textOf(skill.title, info.language ?? "en"), text: skill.text });
       }
     }
     return out;

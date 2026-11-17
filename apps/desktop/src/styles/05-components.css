@@ -481,3 +481,16 @@ textarea.input { height: auto; padding: 7px 8px; resize: vertical; line-height: 
 .evidence-quotes-label::before { content: "✓ "; }
 .evidence-quote { font-family: var(--mono, monospace); font-size: 11.5px; padding: 2px 6px; border: 1px solid var(--line); border-left: 2px solid var(--ok, #54e58a); background: var(--bg-2, rgba(255,255,255,.03)); color: var(--fg-0); word-break: break-all; }
 .evidence-absence { font-size: 12.5px; color: var(--fg-1); padding: 8px 10px; border: 1px dashed var(--line); }
+
+/* How a finding was reached (finding detail) */
+.lineage { list-style: none; margin: 0; padding: 0 20px 18px; display: flex; flex-direction: column; }
+.lineage-step { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; padding: 7px 0 7px 14px; border-left: 2px solid var(--line); position: relative; font-size: 12.5px; }
+.lineage-step::before { content: ""; position: absolute; left: -5px; top: 12px; width: 8px; height: 8px; background: var(--bg-1, #0d0818); border: 2px solid var(--line-hi, #4a3580); }
+.lineage-step.proof::before, .lineage-step.verified::before { border-color: var(--ok, #54e58a); }
+.lineage-step.finding::before { border-color: var(--accent, #ff9a2e); }
+.lineage-when { color: var(--fg-3); font-size: 11px; padding-top: 1px; }
+.lineage-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; color: var(--fg-1); }
+.lineage-body b { color: var(--fg-0); font-weight: 600; }
+.lineage-how { font-family: var(--mono, monospace); font-size: 11px; color: var(--fg-2); word-break: break-all; }
+.lineage-why { font-style: italic; color: var(--fg-2); }
+.lineage-quotes { font-size: 11px; color: var(--ok, #54e58a); }

@@ -9,6 +9,7 @@ import { getBaseline } from "./baseline.js";
 import { type EntityAttributes, REPORT_SECTION_IDS } from "@penteos/schema";
 import type { Engagement, Entity } from "./engagement.js";
 import { restore } from "./privacy/vault.js";
+import { findingLineage, type LineageStep } from "./lineage.js";
 
 type FindingAttrs = EntityAttributes<"finding">;
 const attrs = (f: Entity) => f.attributes as FindingAttrs;
@@ -488,6 +489,25 @@ export function renderReport(engagement: Engagement, options: ReportOptions = {}
       }
       const v = a.verification as { verdict?: string; by?: { type: string; name?: string }; at?: string } | undefined;
       if (v?.verdict === "reproduced" && v.at) out.push(`_${F.verified(v.by?.type === "human" ? (v.by.name ?? "el equipo") : "Penteos", v.at.slice(0, 10))}_`, "");
+      // The chain that led to it (lineage.ts), for the technical reader: facts, and the agent's own
+      // words on why each step was taken.
+      if (kind === "technical") {
+        let chain: LineageStep[] = [];
+        try {
+          chain = findingLineage(engagement, f.id).filter((s) => s.kind !== "approved").slice(0, 10);
+        } catch {
+          chain = [];
+        }
+        if (chain.length > 1) {
+          const clean = (t: string) => engagement.redact(restore(engagement, t).text).replace(/`/g, "'").replace(/\s+/g, " ").trim();
+          out.push(`**${T.lineage}**`, "");
+          for (const s of chain) {
+            const when = `${s.at.slice(0, 10)} ${s.at.slice(11, 16)}`;
+            out.push(`- ${when} · ${T.lineageKinds[s.kind]}: ${clean(s.title)}${s.how ? ` · \`${clean(s.how)}\`` : ""}${s.why ? ` · «${clean(s.why)}»` : ""}`);
+          }
+          out.push("");
+        }
+      }
       if (String(a.remediation ?? "").trim()) out.push(`**${T.remediation}**`, "", String(a.remediation).trim(), "");
       if ((a.references as string[] | undefined)?.length) {
         out.push(`**${T.references}**`, "");

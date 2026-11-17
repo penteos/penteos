@@ -220,11 +220,41 @@ export async function executeOperation(name: string, rawInput: unknown, ctx: Ope
   try {
     const result = await withPace(pace, () => perform(name, op, rawInput, ctx, actorType, flags));
     count(ctx, name, flags);
+    // What it did and why, with the ids it touched: how a finding was reached is rebuilt from this.
+    if (op.kind !== "read") {
+      const intent = typeof (rawInput as { intent?: unknown } | undefined)?.intent === "string" ? String((rawInput as { intent: string }).intent).trim() : undefined;
+      try {
+        engagementFor(ctx, rawInput)?.recordStep(ctx.caller.actor, name, intent || undefined, refsIn([rawInput, result]));
+      } catch {
+        /* the trail never breaks the work */
+      }
+    }
     return result;
   } catch (error) {
     count(ctx, name, { ...flags, error: error instanceof OperationError ? error.code : "INTERNAL" });
     throw error;
   }
+}
+
+/** Ids an operation's input and result name (entities, runs, outputs, approvals), for the agents' trail. */
+const REF_KEY = /^(id|ids|runId|rawId|rawIds|findingId|entityId|evidenceIds|addEvidenceIds|observationIds|approvalId|webappId|endpointId)$/;
+const REF_VALUE = /^([0-9A-HJKMNP-TV-Z]{26}|sha256:[0-9a-f]{64})$/;
+export function refsIn(values: unknown[]): string[] {
+  const out = new Set<string>();
+  const walk = (v: unknown, depth: number, key?: string) => {
+    if (out.size >= 40 || depth > 3 || v === null || v === undefined) return;
+    if (typeof v === "string") {
+      if (key && REF_KEY.test(key) && REF_VALUE.test(v)) out.add(v);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const x of v.slice(0, 40)) walk(x, depth + 1, key);
+      return;
+    }
+    if (typeof v === "object") for (const [k, x] of Object.entries(v as Record<string, unknown>)) walk(x, depth + 1, k);
+  };
+  for (const v of values) walk(v, 0);
+  return [...out];
 }
 
 /** How fast a project talks to its targets (pacing.ts); the default without one. */
