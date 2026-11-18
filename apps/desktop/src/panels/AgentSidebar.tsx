@@ -11,7 +11,7 @@ import { summarize } from "./Home";
 import { RoleSettingsModal } from "../ui/RoleSettings";
 
 import { type Provider, ProviderPicker, ProviderSettings, useOutside } from "../ui/Providers";
-import { Conversation, type Entry, reduce } from "../ui/Conversation";
+import { Conversation, type Entry, intentOf, reduce, shortInput } from "../ui/Conversation";
 import { WaitingStrip } from "../ui/Waiting";
 import { t, tn } from "../i18n";
 import { openConnectAI } from "../ui/ConnectAI";
@@ -310,6 +310,15 @@ export function AgentSidebar(props: { width: number; ask?: string; onAskConsumed
   }, [client, loadProviders, engagement?.id]);
 
   const current = providers.find((p) => p.id === provider);
+  // What the Maestro is doing right now: the latest tool still running, in its own words if it gave them.
+  const nowDoing = (() => {
+    if (!running) return undefined;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i]!;
+      if (e.kind === "tool" && e.status === "running") return { what: intentOf(e.input) ?? `${e.name} ${shortInput(e.input)}`.trim(), ...(e.startedAt ? { since: e.startedAt } : {}) };
+    }
+    return undefined;
+  })();
   const canSend = Boolean(current?.available) && !running && text.trim().length > 0;
 
   // Requests from other panels ("ask the Maestro to write the executive summary").
@@ -397,6 +406,7 @@ export function AgentSidebar(props: { width: number; ask?: string; onAskConsumed
           parked={parked}
           hasConversation={entries.length > 0}
           inlineApprovals={0}
+          {...(nowDoing ? { now: nowDoing } : {})}
           onResume={() => {
             setParked(false);
             client.notify("agent.resume");
@@ -415,6 +425,7 @@ export function AgentSidebar(props: { width: number; ask?: string; onAskConsumed
       ) : null}
       {agent === "maestro" ? (
         <div className="composer">
+          <div className="composer-box">
           <textarea
             value={text}
             disabled={!current?.available || !mayInstruct}
@@ -454,6 +465,7 @@ export function AgentSidebar(props: { width: number; ask?: string; onAskConsumed
                 <ArrowUp size={14} />
               </button>
             )}
+          </div>
           </div>
         </div>
       ) : (

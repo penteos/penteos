@@ -83,6 +83,7 @@ const team: Record<string, string> = {
   "waiting.sendFailed": "Could not send",
   "waiting.answerPlaceholder": "Your answer…",
   "waiting.working": "The Maestro is working. No action required.",
+  "waiting.now": "Now: {what}",
   "waiting.idle": "Nothing is waiting for you.",
   "waiting.title": "Waiting for you",
   "waiting.approvalsInline.one": "{n} approval request pending in the conversation: accept or reject it to continue.",

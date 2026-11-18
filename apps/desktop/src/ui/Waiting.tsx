@@ -1,7 +1,7 @@
 import { CheckCircle2, CircleHelp, Hand, Loader2, Play } from "./icons";
 import { useState } from "react";
 import { type Entity, useApp, useOperation } from "../state";
-import { toast } from "./bits";
+import { toast, useTick } from "./bits";
 import { asksOperator, questionOf } from "../tasks";
 import { t, tn } from "../i18n";
 import { browseOf } from "../browse";
@@ -45,7 +45,25 @@ function Question(props: { task: Entity }) {
   );
 }
 
-export function WaitingStrip(props: { running: boolean; parked: boolean; hasConversation: boolean; inlineApprovals: number; onResume: () => void }) {
+/** m:ss since the current step started. */
+function since(start: number, now: number): string {
+  const s = Math.max(0, Math.floor((now - start) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** "Now: <what the Maestro is doing> · 0:12": the operator sees it is working, and on what. */
+function LiveLine(props: { what: string; since?: number }) {
+  const now = useTick(1000);
+  return (
+    <div className="waiting idle live" title={props.what}>
+      <span className="live-dot" />
+      <span className="live-what">{t("team.waiting.now", { what: props.what })}</span>
+      {props.since ? <span className="live-time mono">{since(props.since, now)}</span> : null}
+    </div>
+  );
+}
+
+export function WaitingStrip(props: { running: boolean; parked: boolean; hasConversation: boolean; inlineApprovals: number; now?: { what: string; since?: number }; onResume: () => void }) {
   const { approvals } = useApp();
   const tasks = useOperation<Entity[]>("entity.query", { kind: "task", limit: 2000 }, { refreshOn: (e) => e.kind === "task" });
   const questions = openQuestions(tasks.data);
@@ -56,6 +74,7 @@ export function WaitingStrip(props: { running: boolean; parked: boolean; hasConv
   if (!waiting) {
     if (approvals.length) return null;
     if (!props.hasConversation) return null;
+    if (props.running && props.now) return <LiveLine what={props.now.what} {...(props.now.since ? { since: props.now.since } : {})} />;
     return (
       <div className="waiting idle">
         {props.running ? <><Loader2 size={12} className="spin" /> {t("team.waiting.working")}</> : <><CheckCircle2 size={12} /> {t("team.waiting.idle")}</>}
