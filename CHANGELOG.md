@@ -4,6 +4,20 @@ All notable changes to Penteos are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-11-18
+
+The Maestro's chat leads the workbench.
+
+### Changed
+- **The chat has its own surface.** A shade lighter than the rest and lifted by a soft shadow, so
+  the eye goes to the conversation first; the workbench around it steps back a little.
+- **A clear reading order.** The Maestro's words are larger and brighter, the operator's go in a
+  violet bubble, and the tool calls are quieter, there for whoever wants to look.
+- **What waits on you is amber, and only that.** A pending approval or question tints its area
+  amber, with a live dot; the pointer in the conversation that leads to it is amber too.
+- **A composer that invites writing.** Taller, with the AI picker inside, lit when it has focus.
+- **What it is doing now.** While the Maestro works, one line says what it is on and for how long.
+
 ## [0.3.0] - 2026-11-17
 
 Long rounds that do not break, proof the AI cannot invent, and a gentler pace with a client's site.
