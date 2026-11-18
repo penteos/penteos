@@ -4,6 +4,47 @@ All notable changes to Penteos are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-11-17
+
+Long rounds that do not break, proof the AI cannot invent, and a gentler pace with a client's site.
+
+### Rounds that keep going
+- **The Maestro's memory over a long round.** Old tool results are trimmed and the older part of
+  the conversation is summed up by the same model (instructions, findings with their ids, open
+  leads, what not to repeat), within a budget per conversation. A model that says the conversation
+  is too long gets it compacted and the step is tried again.
+- **A dropped connection never stops a round.** An answer cut in the middle is asked again at once;
+  a provider that is not answering or rate-limiting is waited for and the round goes on by itself,
+  saying when it tries again. Only what needs a person (no credit, a refused key) stops it.
+- **Another AI takes over** when one runs out of credit or its key is refused, with the round handed
+  over. With none left, one clear message says what happened and what to do.
+
+### Proof
+- **Textual proof.** Evidence quotes the exact text of the response that proves the point, and
+  Penteos checks every quote against the stored output (masked data and compressed bodies
+  included). Medium, high and critical findings reach the operator only with a checked quote, or
+  with what is missing and where it was looked for when the proof is an absence.
+- **How a finding was reached.** Each finding shows its chain: the asset discovered and by what, the
+  leads, the tests with why each one was run (in the agent's words), the evidence, the independent
+  verification and the approval. In the app and in the technical report.
+- **Honest coverage.** A category is clean because it was tested: "tested" says what was tried and
+  the runs or outputs it rests on; "vulnerable" names the finding.
+- The Maestro argues against each finding before writing it (reachability, preconditions, later
+  controls, scope, a simpler explanation) and measures impact with numbers.
+
+### A gentler pace
+- **Pace towards the targets**, per project: quiet, normal (default), aggressive or off for labs.
+  Everything Penteos sends waits for the host's turn, a 429 or 503 pauses the host, and nuclei,
+  ffuf, katana, httpx, sqlmap and nmap get matching rate options. Shown in the Scope panel, with
+  what each host received.
+
+### Simpler
+- **New project, AI step:** two plain questions, how much freedom (Asks me everything, Works and
+  checks with me, Autopilot) and which AI (only the ones that work here).
+- Plugin guides no longer fill the Maestro's memory: long ones are read when the work calls for
+  them.
+- The agent browser gets thirty seconds to start Chrome on a busy machine.
+
 ## [0.2.0] - 2026-11-11
 
 The release that makes Penteos test like a careful team: deeper rounds, new checks, an honest
