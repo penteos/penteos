@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { recordEvent } from "@penteos/core";
 import { type ChatGptAuth, ChatGptSignedOut } from "../chatgpt-auth.js";
-import { type FailureKind, ProviderFailure } from "../failover.js";
+import { CUT_RETRIES, type FailureKind, isCutConnection, ProviderFailure, timing } from "../failover.js";
 import { msg } from "../messages.js";
 import type { ProviderSession, TurnContext } from "../types.js";
 import { agentOperations, displayToolName, LAST_STEP_NOTE, runTool, toolName, toolSchema } from "../tools.js";
@@ -87,6 +87,7 @@ export class ChatGptPlanSession implements ProviderSession {
     this.items.push({ role: "user", content: text });
     const budget = () => Math.min(ctx.memoryTokens ?? memoryBudget(false), this.window ?? Infinity);
     let overflowRetried = false;
+    let cutRetries = 0;
 
     for (let step = 0; step < MAX_STEPS; step++) {
       if (ctx.signal.aborted) return;
@@ -147,6 +148,15 @@ export class ChatGptPlanSession implements ProviderSession {
         }
       } catch (e) {
         if (ctx.signal.aborted) return;
+        // The connection dropped mid-answer: nothing was stored, ask for this step again.
+        if (isCutConnection(e) && cutRetries < CUT_RETRIES) {
+          cutRetries++;
+          ctx.emit({ kind: "status", text: msg(lang, "provider.status.reconnecting", { n: cutRetries, max: CUT_RETRIES }) });
+          await new Promise((r) => setTimeout(r, timing.cutDelayMs * cutRetries));
+          step--;
+          continue;
+        }
+        if (isCutConnection(e)) throw e;
         if (!overflowRetried && isContextOverflow(e)) {
           overflowRetried = true;
           await remember(true);
@@ -168,6 +178,18 @@ export class ChatGptPlanSession implements ProviderSession {
         step--;
         continue;
       }
+      // A stream that stopped with no error is a dropped connection: asked again, then the failover's.
+      if (!failure && !completed) {
+        if (cutRetries < CUT_RETRIES) {
+          cutRetries++;
+          ctx.emit({ kind: "status", text: msg(lang, "provider.status.reconnecting", { n: cutRetries, max: CUT_RETRIES }) });
+          await new Promise((r) => setTimeout(r, timing.cutDelayMs * cutRetries));
+          step--;
+          continue;
+        }
+        throw new Error("terminated: the answer stopped before it was complete");
+      }
+      cutRetries = 0;
       if (failure && failureOf(failure.code)) throw new ProviderFailure(failureOf(failure.code)!, explain(failure.code, lang, failure.message));
       if (failure || !completed) {
         ctx.emit({ kind: "error", text: explain(failure?.code, lang, failure?.message ?? "the stream ended early") });

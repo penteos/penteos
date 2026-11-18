@@ -32,6 +32,8 @@ export class ProviderFailure extends Error {
 /** Why the AI stopped answering, when another AI could carry on; undefined otherwise. */
 export function classifyFailure(error: unknown): FailureKind | undefined {
   if (error instanceof ProviderFailure) return error.kind;
+  // A dropped connection is the provider not answering, never a reason to show a raw error.
+  if (isCutConnection(error)) return "down";
   const e = error as { status?: number; code?: string; type?: string; message?: string; error?: { code?: string; type?: string; message?: string }; cause?: { code?: string } };
   const status = typeof e?.status === "number" ? e.status : undefined;
   const text = `${e?.code ?? ""} ${e?.type ?? ""} ${e?.error?.code ?? ""} ${e?.error?.type ?? ""} ${e?.message ?? ""} ${e?.error?.message ?? ""} ${e?.cause?.code ?? ""}`.toLowerCase();
@@ -43,6 +45,34 @@ export function classifyFailure(error: unknown): FailureKind | undefined {
   if ((status !== undefined && status >= 500) || /overloaded|service unavailable|bad gateway|gateway timeout|econnrefused|enotfound|etimedout|econnreset|eai_again|socket hang up|fetch failed|connection error|network error|timed? ?out/.test(text)) return "down";
   return undefined;
 }
+
+/**
+ * The connection dropped in the middle of an answer ("terminated", a reset socket): nothing was
+ * stored, since a step is kept only once its answer is complete, so the step is simply asked again.
+ * Not a reason to rest the provider (DeepSeek drops long streams now and then).
+ */
+export function isCutConnection(error: unknown): boolean {
+  const e = error as { name?: string; status?: number; code?: string; message?: string; cause?: { code?: string; message?: string; name?: string } };
+  if (!e || e.name === "AbortError" || typeof e.status === "number") return false;
+  const text = `${e.message ?? ""} ${e.code ?? ""} ${e.cause?.code ?? ""} ${e.cause?.message ?? ""} ${e.cause?.name ?? ""}`.toLowerCase();
+  return /terminated|econnreset|epipe|und_err_socket|und_err_body_timeout|other side closed|socket hang up|premature close|connection error|fetch failed|network error|stream (ended|closed)|unexpected end/.test(text);
+}
+
+/** How many times a dropped answer is asked again before it counts as a provider failure. */
+export const CUT_RETRIES = 3;
+
+/**
+ * With no other AI, a provider that is not answering (or rate-limiting) is waited for, never given
+ * up on: the round goes on by itself, asking again after these pauses (the last one repeats), until
+ * it answers or the operator stops it. Only what needs a person (no credit, a refused key) stops it.
+ */
+export const WAIT_STEPS_MS = [10_000, 20_000, 40_000, 60_000, 120_000, 180_000, 300_000];
+
+/** The pause before asking again for an answer whose connection dropped (times the attempt). */
+export const timing = { cutDelayMs: 1500 };
+
+/** What the AI that answers again reads, after a wait. */
+export const RESUME_AFTER_WAIT = "[Penteos] The connection to the AI failed and is back. Continue exactly where you left off: check the last results you have, and do not repeat what is already done.";
 
 const MIN = 60_000;
 const STEPS: Record<FailureKind, number[]> = {

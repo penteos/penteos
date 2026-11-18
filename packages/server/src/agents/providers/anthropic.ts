@@ -4,6 +4,7 @@ import { msg } from "../messages.js";
 import { recordEvent } from "@penteos/core";
 import { agentOperations, displayToolName, LAST_STEP_NOTE, runTool, toolName, toolSchema } from "../tools.js";
 import { announce, anthropicAdapter, isContextOverflow, keepWithinBudget, memoryBudget, type MemoryAdapter } from "../memory.js";
+import { CUT_RETRIES, isCutConnection, timing } from "../failover.js";
 
 const DEFAULT_MODEL = "claude-opus-5-5";
 const MAX_STEPS = 40;
@@ -63,6 +64,7 @@ export class AnthropicSession implements ProviderSession {
       announce(outcome, ctx);
     };
     let overflowRetried = false;
+    let cutRetries = 0;
 
     for (let step = 0; step < MAX_STEPS; step++) {
       if (ctx.signal.aborted) return;
@@ -90,9 +92,19 @@ export class AnthropicSession implements ProviderSession {
       try {
         message = await stream.finalMessage();
         jsonRetries = 0;
+        cutRetries = 0;
         overflowRetried = false;
       } catch (error) {
         if (ctx.signal.aborted) return;
+        // The connection dropped mid-answer: nothing was stored, ask for this step again.
+        if (isCutConnection(error) && cutRetries < CUT_RETRIES) {
+          cutRetries++;
+          ctx.emit({ kind: "status", text: msg(ctx.lang ?? "en", "provider.status.reconnecting", { n: cutRetries, max: CUT_RETRIES }) });
+          await new Promise((r) => setTimeout(r, timing.cutDelayMs * cutRetries));
+          step--;
+          continue;
+        }
+        if (isCutConnection(error)) throw error;
         // The model's window is smaller than the budget assumed: compact now and try once more.
         if (!overflowRetried && isContextOverflow(error)) {
           overflowRetried = true;

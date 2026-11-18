@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { type Caller, type Engagement, type OperationContext, ToolRegistry, ToolRunner, Workspace } from "@penteos/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HUMAN, MAESTRO } from "../src/actors.js";
-import { classifyFailure, Cooldowns, handOver, ProviderFailure } from "../src/agents/failover.js";
+import { classifyFailure, Cooldowns, handOver, ProviderFailure, timing, WAIT_STEPS_MS } from "../src/agents/failover.js";
 import { AgentManager } from "../src/agents/manager.js";
 import type { AgentEvent } from "../src/agents/types.js";
 
@@ -173,3 +173,59 @@ describe("the round goes on, or stops in order", () => {
     expect((await manager.providers(eng.info.id, true)).providers.find((p) => p.id === "deepseek")!.available).toBe(true);
   });
 });
+
+describe("a dropped connection never stops the round", () => {
+  let flaky: Server;
+  let drops = 0;
+  let served = 0;
+  beforeEach(async () => {
+    timing.cutDelayMs = 5;
+    WAIT_STEPS_MS.splice(0, WAIT_STEPS_MS.length, 40);
+    served = 0;
+    flaky = createServer((req, res) => {
+      if (req.url?.endsWith("/models")) return void res.writeHead(200, { "content-type": "application/json" }).end('{"data":[{"id":"m"}]}');
+      req.resume();
+      req.on("end", () => {
+        served++;
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        const chunk = (delta: object, finish: string | null) => `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 0, model: "m", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+        res.write(chunk({ role: "assistant", content: "Recon base listo. " }, null));
+        // The first answers are cut in the middle, as DeepSeek does now and then ("terminated").
+        if (drops > 0) {
+          drops--;
+          // After the first part has reached the client: a drop in the middle of the answer.
+          return void setTimeout(() => res.socket?.destroy(), 30);
+        }
+        res.write(chunk({ content: "Sigo con el mapeo." }, null));
+        res.write(chunk({}, "stop"));
+        res.end("data: [DONE]\n\n");
+      });
+    });
+    const port = await listen(flaky);
+    manager.configure("deepseek", { apiKey: "k", baseUrl: `http://127.0.0.1:${port}/v1`, model: "m" });
+  });
+  afterEach(async () => {
+    timing.cutDelayMs = 1500;
+    WAIT_STEPS_MS.splice(0, WAIT_STEPS_MS.length, 10_000, 20_000, 40_000, 60_000, 120_000, 180_000, 300_000);
+    await new Promise((r) => flaky.close(r));
+  });
+
+  it("an answer cut in the middle is asked again at once", async () => {
+    drops = 1;
+    await manager.send(eng.info.id, "deepseek", "Hacé el recon");
+    expect(served).toBe(2);
+    expect(statuses().some((t) => /Se cortó la conexión con la IA en medio de la respuesta: se vuelve a pedir \(1 de 3\)/.test(t))).toBe(true);
+    expect(events.some((e) => e.kind === "error")).toBe(false);
+  });
+
+  it("with no other AI, a provider that keeps dropping is waited for, and the round goes on", async () => {
+    drops = 6; // more than the quick retries: the failover waits, then it answers
+    await manager.send(eng.info.id, "deepseek", "Hacé el recon");
+    expect(events.some((e) => e.kind === "error")).toBe(false);
+    expect(statuses().some((t) => /DeepSeek no responde .*La ronda sigue sola: se vuelve a intentar a las/.test(t))).toBe(true);
+    expect(statuses().some((t) => /DeepSeek vuelve a responder: el Maestro sigue donde estaba/.test(t))).toBe(true);
+    expect(statuses().some((t) => /quedó en pausa/.test(t))).toBe(false);
+    expect(events.at(-1)).toMatchObject({ kind: "done", provider: "deepseek" });
+  });
+});
+

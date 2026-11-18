@@ -14,7 +14,7 @@ import { systemPrompt } from "./tools.js";
 import { Verifier, type VerifierProvider } from "./verifier.js";
 import { msg } from "./messages.js";
 import { memoryBudget } from "./memory.js";
-import { classifyFailure, Cooldowns, type FailureKind, handOver, type Rest } from "./failover.js";
+import { classifyFailure, Cooldowns, type FailureKind, handOver, RESUME_AFTER_WAIT, type Rest, WAIT_STEPS_MS } from "./failover.js";
 import { type AgentEvent, foldDelta, type ProviderId, type ProviderSession, type ProviderSettings, type SalaCard } from "./types.js";
 
 /** How many times the agent may continue on its own (news only) per operator message. */
@@ -1038,6 +1038,8 @@ export class AgentManager {
     let currentStatus: ProviderStatus = status;
     let input = prompt;
     const tried = new Set<ProviderId>([providerId]);
+    let waits = 0;
+    let resumedAfterWait = false;
     try {
       // One AI after another while they fail for a reason another can carry on from (failover.ts).
       for (;;) {
@@ -1064,6 +1066,7 @@ export class AgentManager {
             memoryTokens: memoryBudget(local),
           });
           this.cooldowns.succeeded(current);
+          if (resumedAfterWait) emit({ kind: "status", text: msg(this.lang(engagementId), "failover.resumed", { provider: currentStatus.label }) });
           break;
         } catch (error) {
           if (controller.signal.aborted) break;
@@ -1077,6 +1080,24 @@ export class AgentManager {
         const rest = this.cooldowns.mark(current, failure, detail);
         engagement.audit(this.caller.actor, "agent.failover", { provider: current }, { kind: failure, detail: detail.slice(0, 200) });
         const next = this.nextProvider((await this.providers(engagementId)).providers, tried);
+        if (!next && (failure === "down" || failure === "rate")) {
+          // No other AI, and the cause lifts by itself: the round waits for it and goes on, never
+          // stops. Only what needs a person (no credit, a refused key) stops a round.
+          const delay = WAIT_STEPS_MS[Math.min(waits, WAIT_STEPS_MS.length - 1)]!;
+          waits++;
+          this.cooldowns.clear(current);
+          this.statusCache = undefined;
+          emit({ kind: "status", text: msg(this.lang(engagementId), failure === "rate" ? "failover.waitingRate" : "failover.waiting", { provider: currentStatus.label, detail: detail.length > 140 ? `${detail.slice(0, 140)}…` : detail, at: this.clock(engagementId, Date.now() + delay) }) });
+          const waited = await new Promise<boolean>((resolve) => {
+            if (controller.signal.aborted) return resolve(false);
+            const timer = setTimeout(() => resolve(true), delay);
+            controller.signal.addEventListener("abort", () => (clearTimeout(timer), resolve(false)), { once: true });
+          });
+          if (!waited) break;
+          input = RESUME_AFTER_WAIT;
+          resumedAfterWait = true;
+          continue;
+        }
         if (!next) {
           this.stopForNoAi(engagementId, conversation, emit, currentStatus.label, rest);
           break;

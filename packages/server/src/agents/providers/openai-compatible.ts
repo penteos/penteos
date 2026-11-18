@@ -4,6 +4,7 @@ import { msg } from "../messages.js";
 import { recordEvent } from "@penteos/core";
 import { agentOperations, displayToolName, LAST_STEP_NOTE, runTool, toolName, toolSchema } from "../tools.js";
 import { announce, chatAdapter, isContextOverflow, keepWithinBudget, memoryBudget, type MemoryAdapter } from "../memory.js";
+import { CUT_RETRIES, isCutConnection, timing } from "../failover.js";
 
 const MAX_STEPS = 40;
 /** A turn that comes back with nothing (no text, no tool call) is asked again this many times. */
@@ -95,44 +96,61 @@ export class OpenAICompatibleSession implements ProviderSession {
 
     let emptyRetries = 0;
     let overflowRetried = false;
+    let cutRetries = 0;
     for (let step = 0; step < MAX_STEPS; step++) {
       if (ctx.signal.aborted) return;
       await remember();
-      let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+      let content = "";
+      let reasoning = 0;
+      const calls = new Map<number, { id: string; name: string; args: string }>();
       try {
-        stream = await client.chat.completions.create({ model, messages: this.messages, tools, ...(step === MAX_STEPS - 1 ? { tool_choice: "none" as const } : {}), stream: true }, { signal: ctx.signal });
-        overflowRetried = false;
+        let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+        try {
+          stream = await client.chat.completions.create({ model, messages: this.messages, tools, ...(step === MAX_STEPS - 1 ? { tool_choice: "none" as const } : {}), stream: true }, { signal: ctx.signal });
+          overflowRetried = false;
+        } catch (error) {
+          // The model's window is smaller than the budget assumed: compact now and try once more.
+          if (!ctx.signal.aborted && !overflowRetried && isContextOverflow(error)) {
+            overflowRetried = true;
+            await remember(true);
+            step--;
+            continue;
+          }
+          throw error;
+        }
+        let finished = false;
+        for await (const chunk of stream) {
+          if (chunk.choices[0]?.finish_reason) finished = true;
+          const delta = chunk.choices[0]?.delta;
+          if (!delta) continue;
+          if (delta.content) {
+            content += delta.content;
+            ctx.emit({ kind: "delta", text: delta.content });
+          }
+          // Reasoning models (DeepSeek, gpt-oss…) stream their thinking apart; it is not the answer.
+          const thinking = (delta as { reasoning_content?: unknown; reasoning?: unknown }).reasoning_content ?? (delta as { reasoning?: unknown }).reasoning;
+          if (typeof thinking === "string") reasoning += thinking.length;
+          for (const call of delta.tool_calls ?? []) {
+            const current = calls.get(call.index) ?? { id: "", name: "", args: "" };
+            if (call.id) current.id = call.id;
+            if (call.function?.name) current.name += call.function.name;
+            if (call.function?.arguments) current.args += call.function.arguments;
+            calls.set(call.index, current);
+          }
+        }
+        // A stream that ends without saying it finished was cut: the answer is not whole.
+        if (!finished) throw new Error("terminated: the answer stopped before it was complete");
+        cutRetries = 0;
       } catch (error) {
-        // The model's window is smaller than the budget assumed: compact now and try once more.
-        if (!ctx.signal.aborted && !overflowRetried && isContextOverflow(error)) {
-          overflowRetried = true;
-          await remember(true);
+        // The connection dropped mid-answer: nothing was stored, ask for this step again.
+        if (!ctx.signal.aborted && isCutConnection(error) && cutRetries < CUT_RETRIES) {
+          cutRetries++;
+          ctx.emit({ kind: "status", text: msg(ctx.lang ?? "en", "provider.status.reconnecting", { n: cutRetries, max: CUT_RETRIES }) });
+          await new Promise((r) => setTimeout(r, timing.cutDelayMs * cutRetries));
           step--;
           continue;
         }
         throw error;
-      }
-
-      let content = "";
-      let reasoning = 0;
-      const calls = new Map<number, { id: string; name: string; args: string }>();
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta;
-        if (!delta) continue;
-        if (delta.content) {
-          content += delta.content;
-          ctx.emit({ kind: "delta", text: delta.content });
-        }
-        // Reasoning models (DeepSeek, gpt-oss…) stream their thinking apart; it is not the answer.
-        const thinking = (delta as { reasoning_content?: unknown; reasoning?: unknown }).reasoning_content ?? (delta as { reasoning?: unknown }).reasoning;
-        if (typeof thinking === "string") reasoning += thinking.length;
-        for (const call of delta.tool_calls ?? []) {
-          const current = calls.get(call.index) ?? { id: "", name: "", args: "" };
-          if (call.id) current.id = call.id;
-          if (call.function?.name) current.name += call.function.name;
-          if (call.function?.arguments) current.args += call.function.arguments;
-          calls.set(call.index, current);
-        }
       }
 
       const toolCalls = [...calls.values()].filter((c) => c.name).map((c, i) => ({ ...c, id: c.id || `call_${Date.now().toString(36)}_${step}_${i}` }));
