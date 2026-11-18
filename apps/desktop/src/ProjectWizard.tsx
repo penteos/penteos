@@ -1,9 +1,9 @@
 import { ArrowLeft, ArrowRight, Bot, Check, Crown, Plus, Crosshair, FlaskConical, GitCompareArrows, Globe, LayoutGrid, Network, RotateCcw, Shield, User, Users, X, Mark, Puzzle } from "./ui/icons";
 import { ptext, usePluginCatalog } from "./ui/plugins";
+import { openConnectAI } from "./ui/ConnectAI";
 import { type ReactNode, useEffect, useState } from "react";
 import { MODE_ORDER, MODES, type ModeId } from "./modes";
 import type { Provider } from "./panels/AgentSidebar";
-import { ChatGptConnect } from "./ui/Providers";
 import { useApp } from "./state";
 import { toast } from "./ui/bits";
 import { type AccountDraft, AccountRows, saveRules } from "./ui/Rules";
@@ -128,10 +128,6 @@ export function ProjectWizard(props: { firstRun: boolean; onClose: () => void })
   const [showRules, setShowRules] = useState(false);
   const [autonomyTouched, setAutonomyTouched] = useState(false);
   const [firstAsk, setFirstAsk] = useState(() => firstAskFor("web"));
-  const [cfgKey, setCfgKey] = useState("");
-  const [cfgModel, setCfgModel] = useState("");
-  const [cfgUrl, setCfgUrl] = useState("");
-  const [configuring, setConfiguring] = useState(false);
   const [root, setRoot] = useState<string>();
   const [saveDir, setSaveDir] = useState<string>();
   // Installed plugins, offered for this project; none is on unless the operator ticks it.
@@ -159,34 +155,16 @@ export function ProjectWizard(props: { firstRun: boolean; onClose: () => void })
   useEffect(() => {
     void loadProviders(true);
   }, [client]);
-  const chosen = providers.find((p) => p.id === provider);
   useEffect(() => {
-    setCfgModel(chosen?.settings.model ?? "");
-    setCfgUrl(chosen?.settings.baseUrl ?? "");
-    setCfgKey("");
-  }, [chosen?.id]);
+    const onPicked = (e: Event) => void loadProviders(true).then(() => setProvider((e as CustomEvent<string>).detail)); // i18n-ignore: generic types, not text
+    window.addEventListener("penteos:provider-selected", onPicked);
+    return () => window.removeEventListener("penteos:provider-selected", onPicked);
+  }, [client]);
+  const chosen = providers.find((p) => p.id === provider);
   useEffect(() => {
     setStartAgent(Boolean(chosen?.available));
   }, [chosen?.available]);
 
-  async function configure() {
-    if (!chosen) return;
-    setConfiguring(true);
-    try {
-      const settings: Record<string, string> = {};
-      if (chosen.fields.includes("apiKey") && cfgKey) settings.apiKey = cfgKey;
-      if (chosen.fields.includes("model")) settings.model = cfgModel;
-      if (chosen.fields.includes("baseUrl")) settings.baseUrl = cfgUrl;
-      const r = await client.request<{ providers: Provider[] }>("agent.configure", { provider: chosen.id, settings });
-      setProviders(r.providers);
-      const now = r.providers.find((p) => p.id === chosen.id);
-      toast(now?.available ? "ok" : "info", now?.available ? t("start.provider.ready", { name: chosen.label }) : t("start.provider.saved", { name: chosen.label }), now?.available ? undefined : now?.reason);
-    } catch (e) {
-      toast("bad", t("common.notSaved"), (e as Error).message);
-    } finally {
-      setConfiguring(false);
-    }
-  }
 
   useEffect(() => {
     if (props.firstRun) return;
@@ -382,75 +360,55 @@ export function ProjectWizard(props: { firstRun: boolean; onClose: () => void })
         ) : null}
 
         {step === "ai" ? (
-          <div className="wizard-body narrow">
-            <h2>{t("start.wizard.ai.title")}</h2>
-            <p className="lead">{t("start.wizard.ai.lead")}</p>
-            <div className="choice-grid">
+          <div className="wizard-body narrow ai-step">
+            {/* Two plain questions: how much freedom, and which AI. Keys and sign-ins live in "Connect an AI". */}
+            <h2>{t("start.wizard.ai.freedom")}</h2>
+            <div className="freedom">
               {LEVELS.map((l) => (
-                <button key={l.id} className={`choice ${autonomy === l.id ? "on" : ""}`} onClick={() => { setAutonomy(l.id); setAutonomyTouched(true); }}>
-                  <div className="ch-icon">{l.icon}</div>
-                  <div className="ch-title">{l.title}{l.id === suggested ? <span className="muted" style={{ fontWeight: 400 }}>{t("start.wizard.ai.suggested")}</span> : null}</div>
-                  <div className="ch-tag">{l.tagline}</div>
-                  <ul className="ch-list">{l.explain.map((x) => <li key={x}>{x}</li>)}</ul>
+                <button key={l.id} className={`freedom-card ${autonomy === l.id ? "on" : ""}`} onClick={() => { setAutonomy(l.id); setAutonomyTouched(true); }}>
+                  <span className="freedom-icon">{l.icon}</span>
+                  <b>{l.title}{l.id === suggested ? <span className="freedom-star" title={t("start.wizard.ai.suggestedTitle")}>★</span> : null}</b>
+                  <span>{l.tagline}</span>
                 </button>
               ))}
             </div>
-            <h2 style={{ marginTop: 14 }}>{t("start.wizard.agent.title")}</h2>
-            <div className="prov-list">
-              {(["plan", "api", "local", "cli"] as const).map((kind) => (
-                <div key={kind}>
-                  <div className="pp-group">{t(`start.wizard.agent.group.${kind}`)}</div>
-                  {providers.filter((p) => p.kind === kind).map((p) => (
-                    <button key={p.id} className={`prov ${provider === p.id ? "on" : ""}`} onClick={() => setProvider(p.id)}>
-                      <span className={`led ${p.available ? "ok" : ""}`} />
-                      <span className="n">{p.label}</span>
-                      <span className="d">{p.available ? p.description : p.reason}</span>
-                    </button>
-                  ))}
-                </div>
-              ))}
-              {providers.length === 0 ? <span className="muted">{t("start.wizard.agent.detecting")}</span> : null}
-            </div>
-            {chosen && (!chosen.available || chosen.fields.length) ? (
-              <div className="prov-config">
-                <div className="lbl">{chosen.available ? t("start.wizard.agent.settingsOf", { name: chosen.label }) : t("start.wizard.agent.configure", { name: chosen.label })}</div>
-                {chosen.kind === "plan" ? <ChatGptConnect onChanged={() => void loadProviders(true)} /> : null}
-                {chosen.kind === "cli" && !chosen.available ? (
-                  <span className="muted">{t("start.wizard.agent.cliMissing", { reason: chosen.reason })}</span>
-                ) : null}
-                {chosen.fields.includes("baseUrl") ? (
-                  <input className="input mono" placeholder={t("start.wizard.agent.baseUrl")} value={cfgUrl} onChange={(e) => setCfgUrl(e.target.value)} />
-                ) : null}
-                {chosen.fields.includes("apiKey") ? (
-                  <input className="input mono" type="password" placeholder={chosen.settings.hasApiKey ? t("start.wizard.agent.apiKeyKept") : t("start.wizard.agent.apiKey")} value={cfgKey} onChange={(e) => setCfgKey(e.target.value)} />
-                ) : null}
-                {chosen.fields.includes("model") && (chosen.kind !== "plan" || chosen.available) ? (
-                  chosen.models?.length ? (
-                    <select className="input" value={cfgModel} onChange={(e) => setCfgModel(e.target.value)}>
-                      {chosen.models.map((m) => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  ) : (
-                    <input className="input mono" placeholder={chosen.kind === "cli" ? t("start.wizard.agent.modelCli") : t("start.wizard.agent.model")} value={cfgModel} onChange={(e) => setCfgModel(e.target.value)} />
-                  )
-                ) : null}
-                <div style={{ display: "flex", gap: 8 }}>
-                  {chosen.fields.length ? <button className="btn sm" disabled={configuring} onClick={configure}>{configuring ? t("start.wizard.agent.saving") : t("common.save")}</button> : null}
-                  <button className="btn sm ghost" onClick={() => void loadProviders(true)}>{t("start.wizard.agent.redetect")}</button>
-                </div>
+            <p className="ai-guarantee">{t("start.wizard.ai.guarantee")}</p>
+
+            <h2>{t("start.wizard.ai.which")}</h2>
+            {providers.some((p) => p.available) ? (
+              <div className="ai-chips">
+                {providers.filter((p) => p.available).map((p) => (
+                  <button key={p.id} className={`ai-chip ${provider === p.id ? "on" : ""}`} onClick={() => setProvider(p.id)}>
+                    <span className="led ok" /> {p.label}
+                  </button>
+                ))}
+                <button className="link-btn" onClick={() => openConnectAI()}>{t("start.wizard.ai.connectOther")}</button>
               </div>
+            ) : providers.length ? (
+              <div className="ai-none">
+                <span>{t("start.wizard.ai.none")}</span>
+                <button className="btn primary sm" onClick={() => openConnectAI()}>{t("agent.noAi.connect")}</button>
+              </div>
+            ) : (
+              <span className="muted">{t("start.wizard.agent.detecting")}</span>
+            )}
+
+            {chosen?.available ? (
+              <label className="check ai-start">
+                <input type="checkbox" checked={startAgent} onChange={(e) => setStartAgent(e.target.checked)} />
+                {t("start.wizard.ai.startNow")}
+              </label>
             ) : null}
-            <label className="check" style={{ flexDirection: "row", marginTop: 4 }}>
-              <input type="checkbox" checked={startAgent && Boolean(chosen?.available)} disabled={!chosen?.available} onChange={(e) => setStartAgent(e.target.checked)} />
-              {t("start.wizard.agent.startNow")}
-            </label>
+            {/* What it is asked first, and the plugins: there for whoever wants them, folded away. */}
             {startAgent && chosen?.available ? (
-              <textarea className="input" rows={3} value={firstAsk} onChange={(e) => setFirstAsk(e.target.value)} />
-            ) : !chosen?.available ? (
-              <span className="muted" style={{ fontSize: 12 }}>{t("start.wizard.agent.later")}</span>
+              <details className="ai-more">
+                <summary>{t("start.wizard.ai.firstAsk")}</summary>
+                <textarea className="input" rows={3} value={firstAsk} onChange={(e) => setFirstAsk(e.target.value)} />
+              </details>
             ) : null}
             {offers.length ? (
-              <div className="wizard-plugins">
-                <h2 style={{ marginTop: 14 }}><Puzzle size={15} /> {t("plugins.wizard.title")}</h2>
+              <details className="ai-more wizard-plugins">
+                <summary><Puzzle size={13} /> {t("start.wizard.ai.plugins", { n: offers.length })}</summary>
                 <p className="lead">{t("plugins.wizard.hint")}</p>
                 {offers.map((p) => (
                   <label key={p.id} className="check wizard-plugin" style={{ flexDirection: "row" }}>
@@ -462,7 +420,7 @@ export function ProjectWizard(props: { firstRun: boolean; onClose: () => void })
                     </span>
                   </label>
                 ))}
-              </div>
+              </details>
             ) : null}
             <div className="wizard-foot">
               <button className="btn ghost" onClick={() => setStep("details")}><ArrowLeft size={13} /> {t("common.back")}</button>
