@@ -4,6 +4,14 @@ All notable changes to Penteos are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - 2026-11-26
+
+### Fixed
+- **Sign in with ChatGPT after an earlier sign-in.** When OpenAI no longer honours the registration
+  kept from a previous sign-in, it refused the code with "already used or expired". Penteos now
+  forgets that registration and starts the sign-in again in the same tab: ChatGPT's page shows
+  once more and the connection completes.
+
 ## [0.3.1] - 2026-11-18
 
 The Maestro's chat leads the workbench.
