@@ -145,7 +145,7 @@ export class ChatGptAuth {
     };
     // The callback can arrive twice (a browser that preloads, a double click, a reload): the code
     // is exchanged once, and every arrival shows that one outcome.
-    let outcome: Promise<{ ok: boolean; title: string; body: string }> | undefined;
+    let outcome: Promise<{ ok: boolean; title: string; body: string; stale?: boolean }> | undefined;
     server.on("request", (req, res) => {
       const url = new URL(req.url ?? "/", redirect);
       if (url.pathname !== CALLBACK_PATH) {
@@ -181,9 +181,29 @@ export class ChatGptAuth {
       const code = url.searchParams.get("code") ?? "";
       outcome = this.exchange(clientId, code, verifier, redirect, nonce).then(
         () => ({ ok: true, title: "Penteos is connected", body: "Your ChatGPT plan is ready. Go back to Penteos." }),
-        (e: Error) => ({ ok: false, title: "Not connected", body: `${explainFailure(e.message)} <span style="color:#9a8fb8">(${e.message.replace(/[<>&]/g, "")})</span>` }),
+        (e: Error) => ({
+          ok: false,
+          title: "Not connected",
+          body: `${explainFailure(e.message)} <span style="color:#9a8fb8">(${e.message.replace(/[<>&]/g, "")})</span>`,
+          // A registration kept from an earlier sign-in that OpenAI no longer honours: OpenAI still
+          // hands out a code for it, then refuses to exchange it.
+          stale: Boolean(returning) && /^token_exchange:(invalid_grant|invalid_client)\b/.test(e.message),
+        }),
       );
-      void outcome.then((o) => {
+      void outcome.then(async (o) => {
+        if (o.stale) {
+          // Forget it and start a fresh registration in the same tab: the operator sees ChatGPT's
+          // page once more and is connected, never this error. Only once: the new attempt has no
+          // registration to fall back from.
+          this.forgetRegistration();
+          try {
+            const next = await this.begin(done);
+            res.writeHead(302, { location: next.url, "cache-control": "no-store" }).end();
+            return;
+          } catch {
+            /* could not start again: say what happened */
+          }
+        }
         page(o.title, o.body, o.ok);
         // The listener stays a moment for a second arrival of the same callback, then goes.
         setTimeout(() => finish(o.ok ? { ok: true } : { ok: false, error: o.body.replace(/<[^>]+>/g, "") }), 3000);
@@ -313,6 +333,15 @@ export class ChatGptAuth {
     }
     this.store(body);
     return this.state.accessToken!;
+  }
+
+  /** Forgets this install's registration at OpenAI (and its tokens); the next sign-in registers again. The host id stays. */
+  private forgetRegistration(): void {
+    delete this.state.clientId;
+    delete this.state.subject;
+    delete this.state.idToken;
+    delete this.state.email;
+    this.clearTokens();
   }
 
   private clearTokens(): void {

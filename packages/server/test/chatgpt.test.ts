@@ -22,6 +22,8 @@ let dir: string;
 let server: Server;
 let base: string;
 const usedCodes = new Set<string>();
+/** Registrations OpenAI no longer honours: it still hands out codes for them, then refuses the exchange. */
+const deadClients = new Set<string>();
 let auth: ChatGptAuth;
 let seen: { challenge?: string; revoked?: string; responses: Array<Record<string, unknown>>; refreshTokens: string[] };
 let responsesReply: (res: import("node:http").ServerResponse) => void;
@@ -59,6 +61,7 @@ beforeEach(async () => {
       if (url.pathname === "/api/accounts/oauth/token") {
         if (form.get("grant_type") === "authorization_code") {
           const challenge = createHash("sha256").update(form.get("code_verifier") ?? "").digest("base64url");
+          if (deadClients.has(String(form.get("client_id")))) return json(400, { error: "invalid_grant" });
           if (form.get("code") !== "good-code" || challenge !== seen.challenge || form.get("resource") !== "https://api.openai.com/v1") return json(400, { error: "invalid_grant" });
           // Like OpenAI: a code works once.
           if (usedCodes.has(String(form.get("code")) + challenge)) return json(400, { error: "invalid_grant" });
@@ -105,6 +108,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   auth.cancel();
+  deadClients.clear();
   await new Promise((r) => server.close(r));
   rmSync(dir, { recursive: true, force: true });
 });
@@ -172,6 +176,55 @@ it("a failure says what went wrong on the page, in words and with its code", asy
   expect(page).toContain("token_exchange:invalid_grant");
   expect(page).toContain("go back to Penteos");
   expect((await done).error).toMatch(/already used or expired/);
+});
+
+it("a kept registration OpenAI no longer honours is forgotten and the sign-in starts again in the same tab", async () => {
+  // Signed in once, then signed out: the registration stays for the next sign-in.
+  await signIn((redirect, state) => {
+    redirect.search = new URLSearchParams({ code: "good-code", state, client_id: "oaiapp_old" }).toString();
+    return redirect;
+  });
+  await auth.signOut();
+  deadClients.add("oaiapp_old");
+
+  let resolveDone!: (r: { ok: boolean; error?: string }) => void;
+  const done = new Promise<{ ok: boolean; error?: string }>((r) => (resolveDone = r));
+  const first = new URL((await auth.begin((r) => resolveDone(r))).url);
+  expect(first.searchParams.get("client_id")).toBe("oaiapp_old");
+  seen.challenge = first.searchParams.get("code_challenge") ?? undefined;
+  await fetch(first);
+  const back = new URL(first.searchParams.get("redirect_uri")!);
+  back.search = new URLSearchParams({ code: "good-code", state: first.searchParams.get("state")!, client_id: "oaiapp_old" }).toString();
+
+  // No error page: the browser is sent to ChatGPT's page again, for a fresh registration.
+  const answer = await fetch(back, { redirect: "manual" });
+  expect(answer.status).toBe(302);
+  const again = new URL(answer.headers.get("location")!);
+  expect(again.pathname).toBe("/api/accounts/authorize");
+  expect(again.searchParams.get("client_id")).toBe("dynamic_agent_client");
+  expect(again.searchParams.has("id_token_hint")).toBe(false);
+  expect(again.searchParams.get("state")).not.toBe(first.searchParams.get("state"));
+
+  seen.challenge = again.searchParams.get("code_challenge") ?? undefined;
+  await fetch(again);
+  const back2 = new URL(again.searchParams.get("redirect_uri")!);
+  back2.search = new URLSearchParams({ code: "good-code", state: again.searchParams.get("state")!, client_id: "oaiapp_new" }).toString();
+  expect(await fetch(back2).then((r) => r.text())).toContain("Penteos is connected");
+  expect(await done).toEqual({ ok: true });
+  expect(auth.status()).toMatchObject({ signedIn: true, plan: true });
+  const onDisk = readFileSync(join(dir, "config", "chatgpt.json"), "utf8");
+  expect(onDisk).toContain("oaiapp_new");
+  expect(onDisk).not.toContain("oaiapp_old");
+}, 20_000);
+
+it("a fresh registration that fails says so and does not loop", async () => {
+  deadClients.add("oaiapp_123");
+  const result = await signIn((redirect, state) => {
+    redirect.search = new URLSearchParams({ code: "good-code", state, client_id: "oaiapp_123" }).toString();
+    return redirect;
+  });
+  expect(result.ok).toBe(false);
+  expect(result.error).toMatch(/already used or expired/);
 });
 
 it("an answer that does not carry this attempt's state is refused", async () => {
